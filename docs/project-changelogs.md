@@ -70,6 +70,48 @@ When completing a feature, bug fix, or refactor:
 
 ## 📅 Chronological Global Index
 
+### 2026-10-31
+
+#### [ThirdPLIL KiriminAja Frontend (r022 — Credentials page now manages callback registration)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-31r022--credentials-page-now-manages-callback-registration-and-reflects-the-bearer-auth-webhook-redesign)
+- **Changed**: the Credentials page now shows callback readiness on each card, exposes the canonical callback URL with Copy action, and adds a live `Register Callback / Re-register Callback` action wired to `POST /thirdplil-admin-credentials/credentials/:id/register-callback`. `api_user` is now clearly optional metadata in the create modal, matching the backend credential contract.
+- **Fixed**: BUG-KA-FE-25 (HIGH — no callback registration path in the UI) and BUG-KA-FE-26 (MEDIUM — `api_user` falsely required). `npm run lint` (`tsc --noEmit`) clean; first live register attempt surfaced the KA sandbox provider error on-card instead of hiding it.
+
+### 2026-10-30
+
+#### [ThirdPLIL KiriminAja Frontend (r021 — no frontend code; backend resolves local coverage ids, closing BUG-KA-FE-24)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-30r021--no-frontend-code-this-rev-backend-resolves-local-coverage-ids--ka-ids-closing-bug-ka-fe-24)
+- **Changed**: (none — frontend unchanged this rev).
+- **Fixed**: BUG-KA-FE-24 (HIGH) closed by the paired backend r021 fix — the create path now translates the wizard's local coverage `area_id`s into KiriminAja ids before booking, so a district→district booking succeeds (HTTP 200 `provider_order_id LVA-1-SMOKE-G3-003-1`). The wizard payload is unchanged, so no frontend edit was needed.
+
+#### [ThirdPLIL KiriminAja Frontend (r020 — `order_id` prefix editable in Credentials view)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-30r020--kiriminaja-order_id-prefix-is-now-per-credential-and-editable-in-the-credentials-view)
+- **Changed**: `SubscriberCredential` gained `order_id_prefix`; the Credentials view Add modal now captures "Order ID Prefix (Format Order ID KA)" (default `LVA`), each card displays the prefix, and a new Edit modal updates `account_label` + `order_id_prefix` via `PATCH /thirdplil-admin-credentials/credentials/:id`.
+- **Fixed**: BUG-KA-FE-23 (the KA `order_id` prefix was a hardcoded adapter constant with no UI/field). Logged BUG-KA-FE-24 (HIGH, OPEN) — the Create Wizard submits local coverage `area_id`s that the create path forwards to KA unchanged, which is why a real booking returns `Origin tidak ditemukan` (paired backend BUG-THIRDPLIL-35).
+
+#### [ThirdPLIL KiriminAja Frontend (r019 — district/kecamatan coverage usable in Rate Calculator + Create Wizard)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-30r019--district-kecamatan-coverage-made-usable-end-to-end-in-rate-calculator-and-create-wizard)
+- **Changed**: Rate Calculator now treats kecamatan (`district`) as a valid final origin/destination level — `isFinalLevel()` replaces the `subdistrict`-only check in `canFetch` — and the Rate → Wizard deep link forwards `origin_level` / `destination_level`; the wizard reads that level via `pickLevel()` and seeds `district_area_id`, so a district prefill now passes step-1 validation.
+- **Fixed**: BUG-KA-FE-20 (Fetch Rates stayed disabled for a district selection), BUG-KA-FE-21 (deep link dropped the level), BUG-KA-FE-22 (wizard prefill hardcoded `subdistrict` and left `district_area_id` empty). Also filled the previously empty Known Bugs matrix. Verified live: `Denpasar Barat → Gambir` 1 kg → `jnt:JND` Rp 38,000 · `tiki:ECO` Rp 18,000 · `tiki:REG` Rp 21,000; `tsc --noEmit` clean.
+
+### 2026-10-21
+
+#### [ThirdPLIL KiriminAja Frontend (r018 — coverage lookup now uses real subscriber cache)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-21r018--coverage-lookup-now-uses-the-real-subscriber-cache-not-demo-rows)
+- **Changed**: `SubdistrictCoverageLookup` now reads subscriber-scoped cached coverage rows from `thirdplil-admin-coverage-sync` instead of falling back to local demo rows. The shipment wizard also passes the current environment into that lookup so sandbox/prod flows read the right cache path.
+- **Fixed**: BUG-KA-FE-19. Zipcode/lat/lng auto-fill now only uses real cached data, and an empty or incomplete cache shows an honest warning state instead of sample coordinates.
+
+#### [ThirdPLIL KiriminAja Frontend (r017 — shipment UI aligned to new backend booking/AWB contract)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-21r017--frontend-shipment-contract-realignment-for-ka-booking-awb-pending-flow-and-canonical-statuses)
+- **Changed**: Added a frontend shipment-alignment checklist doc, re-synced `src/types/thirdplil.ts` to the 17 canonical statuses + new shipment fields, and updated the wizard/dashboard/detail flow to match the new backend semantics: `POST /shipments` now means create + provider booking, AWB may be immediate or pending, and AWB labels use the hosted URL response shape.
+- **Fixed**: The wizard now sends the required `kecamatan_area_id` / zipcode / lat-long / `base_shipping_fee_idr` payload, the dashboard cancels via the real delete route, and shipment screens no longer assume the old `origin_*` / `destination_*` / `new_status` shapes. `npm run lint` (`tsc --noEmit`) passes after the alignment.
+
+#### [ThirdPLIL KiriminAja Frontend (r016 — NONE code, docs-only pair with backend r012: MitraAPI adapter reconciliation)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-21r016--frontend-none-this-rev-backend-doc-reconciliation-kiriminaja-adapter-audited-vs-official-mitraapi-spec)
+- **Frontend no write, backend-only rev**: Backend audited the KiriminAja adapter against the official `api-reference.json` + a live sandbox probe and found it targets a non-existent API shape (Bearer-only auth, no `/api/v2` base suffix, all 11 endpoint paths invented, envelope key `results`, no webhook event id, webhook unsigned). Full rewrite plan lives in `09-mitraapi-adapter-reconciliation.md`.
+- Backend also reconciled the umbrella docs `07-auth-tenancy-design.md` (new §0 Schema Map) and `08-onboarding-and-openapi-workflows.md`; repo naming updated `ThirdPLILFrontend` → `LOVAIntegrationLayerFrontend`.
+- Paired backend cross-ref: [kiriminaja-changelogs.md §r012](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L80-L106).
+
+### 2026-10-20
+
+#### [ThirdPLIL KiriminAja Frontend (r016b — NONE code: IL schema consolidation + repo rename traceability)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-20r016b--frontend-repo-rename--il-schema-consolidation-notes)
+- **Frontend no write**: Backend migration rehaul consolidated the old `0001`–`0009` ThirdPLIL family into `lova_il` + `thirdpl_il` + `pgil`, renamed the session GUC to `lova_il.current_subscriber_id`, dropped the `private` schema, and added PGIL table grants. The frontend repo is now **`LOVAIntegrationLayerFrontend`** (unified ThirdPLIL + PGIL UI).
+- **Known follow-up**: `src/types/thirdplil.ts` + `src/utils/thirdplilApi.ts` still mirror the pre-rewrite provider contract; re-sync after the backend adapter rewrite (Phase D) lands.
+- Paired backend cross-ref: [webstoresupabase-migration-fix-plan.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/webstoresupabase-migration-fix-plan.md).
+
 ### 2026-10-12
 
 #### [ThirdPLIL KiriminAja Frontend (r014 — Credentials view: display webhook URL + wh_secret after credential creation)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)

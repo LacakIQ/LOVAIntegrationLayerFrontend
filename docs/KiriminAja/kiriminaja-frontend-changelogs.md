@@ -130,9 +130,133 @@ Shared hook `useShipmentPackageValidator()` — reused by Rate Calculator Packag
 
 | ID | Severity | Area | Root Cause | Impact | Target Resolution |
 |:---|:---|:---|:---|:---|:---|
-| *(None yet. Add rows here as bugs are discovered during implementation. Severity = CRITICAL/HIGH/MEDIUM/LOW)* | | | | | |
+| BUG-KA-FE-17 | HIGH | Create Wizard payload | Wizard still built the pre-rehaul booking payload (no `origin_kecamatan_area_id`, zipcode, lat/long, `base_shipping_fee_idr`; `is_sandbox` hardcoded; expected nested `{ shipment }`) | Browser could not create a valid KiriminAja booking even after the backend was fixed | FIXED in r017 |
+| BUG-KA-FE-18 | HIGH | Dashboard / Drawer / types | Screens assumed the old shipment enum + row shape (`quoted`, `origin_*`, `destination_*`, `new_status`, `note_jsonb`) | Status rendering drift, broken cancel route, wrong AWB label + drawer hydration | FIXED in r017 |
+| BUG-KA-FE-19 | HIGH | `SubdistrictCoverageLookup` | Component fell back to hardcoded demo rows whenever the cache was empty or errored | Plausible but fake zipcode/lat/lng shown to operators | FIXED in r018 |
+| BUG-KA-FE-20 | HIGH | Rate Calculator | `canFetch` required `level === 'subdistrict'` | Fetch Rates stayed disabled for a kecamatan selection; district lanes could not be priced at all | FIXED in r019 |
+| BUG-KA-FE-21 | MEDIUM | Rate → Wizard deep link | URL carried only the area id, never the level | Any district selection was silently reinterpreted downstream | FIXED in r019 |
+| BUG-KA-FE-22 | HIGH | Create Wizard prefill | Prefill hardcoded `level:'subdistrict'` and never populated `district_area_id` | A district prefill permanently failed step-1 `contactBlockMissing` validation | FIXED in r019 |
+| BUG-KA-FE-23 | MEDIUM | Credentials view | The KA `order_id` prefix was not editable — it was a hardcoded adapter constant with no field on the credential | Operators could not align the IL with the "Format Order ID" registered on their KA account, so `request_pickup` returned HTTP 400 | FIXED in r020 |
+| BUG-KA-FE-24 | HIGH | Create Wizard submit | Wizard sends local coverage `area_id`s as `origin/destination_kecamatan_area_id` (and subdistrict ids), which the shipments edge forwarded unchanged to KA | Booking against real KA failed with `Origin tidak ditemukan` (paired backend BUG-THIRDPLIL-35) | FIXED in r021 (backend-side) |
+| BUG-KA-FE-25 | HIGH | Credentials callback setup | Credentials UI had no callback registration action or callback-state visibility; operators only saw a generated URL and had to manage KA `set_callback` manually outside the app | The redesigned webhook contract could not be executed from the dashboard, so the biggest inbound-auth gap stayed operationally unresolved | FIXED in r022 |
+| BUG-KA-FE-26 | MEDIUM | Credentials create modal | The modal still treated `api_user` as a required auth field even though KiriminAja auth is Bearer-key-only and backend already made `api_user` optional metadata | Operators were blocked by a fake requirement and the UI contract drifted from the backend credential model | FIXED in r022 |
 
 ---
+
+### 2026-10-31.r022 — Credentials page now manages callback registration and reflects the bearer-auth webhook redesign
+**Scope**: [src/views/thirdplil/CredentialsKiriminAjaView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/CredentialsKiriminAjaView.tsx), [src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-31.r022](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md)
+
+#### Changes
+- `SubscriberCredential` ([src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts)) now carries callback-management fields: `callback_url`, `ka_callback_registered_at`, `ka_callback_register_ok`, and `ka_callback_register_message`.
+- [CredentialsKiriminAjaView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/CredentialsKiriminAjaView.tsx) now exposes callback management directly on each credential card: a callback status badge, the canonical callback URL with Copy action, last registration result text, and a new **Register Callback / Re-register Callback** action that calls `POST /thirdplil-admin-credentials/credentials/:id/register-callback`.
+- The create-credential flow now treats `callback_url` as the primary setup artifact and updates the success banner copy accordingly. The legacy `wh_secret` is still displayed once as fallback-only cutover support, but it is no longer presented as the main integration path.
+- The add modal copy now marks `api_user` as optional metadata rather than required auth material, and the submit validation only requires `account_label` + `api_key`.
+
+#### Found Bugs
+- **BUG-KA-FE-25 (HIGH)**: the Credentials page had no executable callback registration path, so operators could not complete the new KA-native `set_callback(url)` flow from the dashboard itself.
+- **BUG-KA-FE-26 (MEDIUM)**: the add modal still enforced `api_user` as a required field even though KiriminAja auth is Bearer-key-only and the backend had already relaxed that requirement.
+
+#### Fixes
+- **FIX-KA-FE-25**: added callback state display and the `registerCallback()` UI action in [CredentialsKiriminAjaView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/CredentialsKiriminAjaView.tsx), wired to the new backend endpoint. The card now shows whether callback registration is pending, failed, or ready, plus the provider message from the latest attempt.
+- **FIX-KA-FE-26**: removed the fake `api_user` requirement from the add modal validation and updated labels/help text so the UI matches the backend credential model. `npm run lint` (`tsc --noEmit`) clean.
+- **Live smoke note**: the first `Register Callback` attempt hit the backend route and persisted callback attempt state correctly, but KA sandbox returned `Oops, terjadi kesalahan. Coba beberapa saat lagi.` The UI now surfaces that provider result on the card instead of hiding it.
+
+---
+
+### 2026-10-30.r021 — no frontend code this rev (backend resolves local coverage ids → KA ids, closing BUG-KA-FE-24)
+**Scope**: (none — frontend unchanged)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-30.r021](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md)
+
+#### Changes
+- (none for this rev)
+
+#### Found Bugs
+- **BUG-KA-FE-24 (HIGH)**: the Create Wizard submits the local coverage `area_id`s (`district_area_id`, `subdistrict.id`) as `origin/destination_kecamatan_area_id` / `_subdistrict_id`. The backend create path used to forward these to KiriminAja unchanged, so a real booking failed with `Origin tidak ditemukan`. Paired backend entry: BUG-THIRDPLIL-35.
+
+#### Fixes
+- **FIX-KA-FE-24**: closed by the backend r021 fix (the create path now translates the local ids to KA ids before booking). No frontend change was required — the wizard payload stays as-is, so `npm run lint` state is unchanged.
+- Verified end-to-end from the wizard lane: the `Denpasar Barat → Gambir` G-3 booking returns HTTP 200 with `provider_order_id: "LVA-1-SMOKE-G3-003-1"` (see backend r021).
+
+---
+
+### 2026-10-30.r020 — KiriminAja `order_id` prefix is now per-credential and editable in the Credentials view
+**Scope**: [src/views/thirdplil/CredentialsKiriminAjaView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/CredentialsKiriminAjaView.tsx), [src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-30.r020](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md)
+
+#### Changes
+- `SubscriberCredential` ([src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts)) gained `order_id_prefix?: string | null`.
+- [CredentialsKiriminAjaView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/CredentialsKiriminAjaView.tsx): the Add-credential modal now has an **"Order ID Prefix (Format Order ID KA)"** input (default `LVA`); each account card shows the prefix; a new **Edit** action opens a modal that edits `account_label` + `order_id_prefix` and saves via **`PATCH /thirdplil-admin-credentials/credentials/:id`** (the API wrapper already supports the `PATCH` verb, so no wrapper change was needed).
+
+#### Found Bugs
+- **BUG-KA-FE-23 (MEDIUM)**: the KA `order_id` prefix had no UI and no backing field — it was a hardcoded adapter constant. Since KA validates `order_id` against the account-registered format, operators had no way to configure it from the dashboard.
+- **BUG-KA-FE-24 (HIGH)**: the Create Wizard sends the local coverage `area_id`s (`district_area_id`, `subdistrict.id`) as `origin/destination_kecamatan_area_id` / `_subdistrict_id`. The backend create path forwards these to KA unchanged, so a real booking fails with `Origin tidak ditemukan`. Paired backend entry: BUG-THIRDPLIL-35. Not fixed this rev.
+
+#### Fixes
+- **FIX-KA-FE-23**: added the `order_id_prefix` field (Add modal + card display), the Edit modal, and the `saveEdit()` PATCH call in [CredentialsKiriminAjaView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/CredentialsKiriminAjaView.tsx); `npm run lint` (`tsc --noEmit`) clean.
+- Verified end-to-end against the live KA sandbox: the G-3 booking's `Format Order ID tidak sesuai` rejection is gone after the backend applied the `LVA` prefix (see backend r020).
+
+---
+
+### 2026-10-30.r019 — District (kecamatan) coverage made usable end-to-end in Rate Calculator and Create Wizard
+**Scope**: [src/views/thirdplil/RateCalculatorView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/RateCalculatorView.tsx), [src/views/thirdplil/ShipmentCreateWizardView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/ShipmentCreateWizardView.tsx)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-30.r019](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md)
+
+#### Changes
+- Rate Calculator now accepts **kecamatan (district)** as a valid final origin/destination level. A new `isFinalLevel()` helper (`district` OR `subdistrict`) replaces the old `level === 'subdistrict'` check inside `canFetch`, matching the backend, which resolves either level to the provider `kecamatan_id` in `resolveProviderAreaIds()`. Weight/volume guards are unchanged.
+- The Rate → Create Wizard deep link now carries the selected level: `onSelectQuote` appends `origin_level` / `destination_level` next to `origin_subdistrict_id` / `destination_subdistrict_id`, so the wizard can tell a kecamatan id from a kelurahan id.
+- Create Wizard step-1 prefill now honours that level and seeds the kecamatan field. A new `pickLevel()` maps the query string to `'district' | 'subdistrict'`; when the level is `district` the incoming id is written into `district_area_id` (and the sender/recipient coverage object), so the visible prefill matches what step-1 validation actually checks.
+- No change was needed in the shared `SubdistrictCoverageLookup`: its drill-down already emits the local `area_id` with `level='district'` and a selectable "Pilih Kecamatan ini" action, which is exactly the shape the wizard and Rate Calculator now consume.
+
+#### Found Bugs
+- **BUG-KA-FE-20 (HIGH)**: Rate Calculator's `canFetch` required `level === 'subdistrict'`. Because a kecamatan is a legitimate final level that the backend prices, a District → District lane left the Fetch Rates button permanently disabled and the operator could not get any quote.
+- **BUG-KA-FE-21 (MEDIUM)**: the Rate → Wizard deep link forwarded only the area id, never the level. Any district selection was therefore silently reinterpreted once it reached the wizard, which had no way to know whether the id was a kelurahan or a kecamatan.
+- **BUG-KA-FE-22 (HIGH)**: the wizard hardcoded the seeded coverage object to `level:'subdistrict'` and never populated `district_area_id` from the URL. Result: a District pick from the Rate Calculator produced a prefill that could never pass step-1 validation (`contactBlockMissing`), because the required kecamatan field stayed empty.
+
+#### Fixes
+- **FIX-KA-FE-20**: added `isFinalLevel()` in [RateCalculatorView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/RateCalculatorView.tsx) and applied it to `canFetch`, so both `district` and `subdistrict` selections enable Fetch Rates.
+- **FIX-KA-FE-21**: [RateCalculatorView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/RateCalculatorView.tsx) `onSelectQuote` now appends `origin_level` / `destination_level` to the wizard deep link.
+- **FIX-KA-FE-22**: [ShipmentCreateWizardView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/ShipmentCreateWizardView.tsx) reads the forwarded level via `pickLevel()` and seeds `district_area_id` whenever the level is `district`; a kelurahan prefill still resolves through its kecamatan parent as before.
+- Verified against the live KA sandbox: `Denpasar Barat (91994) → Gambir (92354)`, 1000 g → `jnt:JND` Rp 38,000 · `tiki:ECO` Rp 18,000 · `tiki:REG` Rp 21,000; schedules for pickup `2026-10-31` return 4 windows. `npm run lint` (`tsc --noEmit`) clean.
+
+---
+
+### 2026-10-21.r018 — Coverage lookup now uses the real subscriber cache, not demo rows
+**Scope**: [src/components/thirdplil/SubdistrictCoverageLookup.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/components/thirdplil/SubdistrictCoverageLookup.tsx), [src/views/thirdplil/ShipmentCreateWizardView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/ShipmentCreateWizardView.tsx)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-21.r016](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md)
+
+#### Changes
+- `SubdistrictCoverageLookup` now reads area rows from the subscriber-scoped admin cache endpoint (`GET /functions/v1/thirdplil-admin-coverage-sync?level=...`) instead of the old `thirdplil-rates/coverage/areas` + local demo fallback combination. Province/city/district/kelurahan browsing still works as the same 4-step cascade, but the component now shows the real cache state instead of fabricating rows when the cache is empty.
+- The lookup banner copy was rewritten to be explicit: zipcode and geo fields are only auto-filled when the backend cache genuinely has them. Missing `latitude` / `longitude` are now treated as honest data gaps, not silently replaced by sample coordinates.
+- `ShipmentCreateWizardView` now passes the current shipment environment (`sandbox` / `production`) into the lookup component and updates its step-1 helper text so operators understand that empty zipcode/lat/lng fields may still need manual entry until coverage enrichment is finished.
+
+#### Found Bugs
+- **BUG-KA-FE-19 (HIGH, FIXED this rev)**: `SubdistrictCoverageLookup` still fell back to hardcoded demo rows whenever the cache query returned empty or errored. Result: changing kelurahan could appear to produce plausible but fake zipcode/lat/lng values, which is exactly the misleading behavior the user flagged in the shipment wizard.
+
+#### Fixes
+- **FIX-KA-FE-19**: removed the local demo-row fallback path from [SubdistrictCoverageLookup.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/components/thirdplil/SubdistrictCoverageLookup.tsx) and switched the component to the real admin cache API. The UI now either shows actual cached rows or clearly explains what prerequisite is missing (parent selection, empty cache, or cache lookup failure).
+
+### 2026-10-21.r017 — Frontend shipment contract realignment for KA booking, AWB pending flow, and canonical statuses
+**Scope**: [docs/KiriminAja/04-frontend-shipment-alignment-checklist.md](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/docs/KiriminAja/04-frontend-shipment-alignment-checklist.md), [src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts), [src/views/thirdplil/ShipmentCreateWizardView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/ShipmentCreateWizardView.tsx), [src/views/thirdplil/RateCalculatorView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/RateCalculatorView.tsx), [src/views/thirdplil/ShipmentsDashboardView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/ShipmentsDashboardView.tsx), [src/components/thirdplil/ShipmentDetailDrawer.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/components/thirdplil/ShipmentDetailDrawer.tsx), [src/components/thirdplil/RateResultsTable.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/components/thirdplil/RateResultsTable.tsx)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-21.r015](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L84-L103)
+
+#### Changes
+- Added a new implementation checklist document, [`04-frontend-shipment-alignment-checklist.md`](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/docs/KiriminAja/04-frontend-shipment-alignment-checklist.md), to lock the shipment-frontend work before and during execution. It lists the exact backend contract deltas: 17 canonical statuses, hosted AWB URL handling, create+booking semantics, new location fields, `base_shipping_fee_idr`, and the real shipment/detail row shape.
+- Re-aligned `src/types/thirdplil.ts` to the current backend contract. `ShipmentStatus` now matches the 17 DB-canonical values; shipment types now model `shipment_id`, `credential_id`, `sender_*`, `recipient_*`, optional `partner_order_ids`, `grand_total_idr`, and the new create payload fields (`origin_kecamatan_area_id`, `origin_zipcode`, lat/long, `base_shipping_fee_idr`, `external_ref`, `external_order_ref`). Compatibility aliases were kept for a few old `origin_*` / `destination_*` consumers while the screens were being moved.
+- Updated the create wizard to submit the real booking payload expected by the backend. The wizard now collects `kecamatan_area_id`, `zipcode`, `latitude`, and `longitude` for both sender and recipient, sends the chosen quote’s `base_fee_idr` as `base_shipping_fee_idr`, forwards `credentialId` through the request header, supports a real `is_sandbox` toggle, and removes the old empty-string `transaction_id` body field that conflicted with header-based idempotency.
+- Changed create success handling to the new backend response semantics: `POST /shipments` is now treated as **create + KiriminAja booking**. The wizard success banner distinguishes `awb_assigned` (AWB returned immediately) from `provider_submitted` (booking accepted but AWB pending webhook/polling), and the navigation back to the dashboard uses `shipment_id` instead of the old nested `shipment.id` assumption.
+- Reworked shipments dashboard read behavior to the current contract: canonical status labels/tones, real field names (`sender_*`, `recipient_*`, `shipment_id`), `DELETE /thirdplil-shipments/:id` for cancel instead of the non-existent `/cancel` sub-route, and the new AWB label response shape `{ url, awb_no, provider }`.
+- Reworked `ShipmentDetailDrawer` around the actual detail/timeline payload we now return. The drawer summary reads `sender_*` / `recipient_*`, grand total falls back to `grand_total_idr`, the pickup tab describes booking/AWB progress using `pickup_requested` / `pickup_scheduled` / `courier_picked_up`, and the timeline uses the real history fields (`history_id`, `status`, `transition_reason`, `source`, `actor`, `raw_provider_status`) instead of the older `prior_status` / `new_status` / `note_jsonb` assumption.
+- Updated the fallback sample `RateResultsTable` quotes to use the composite service-code pattern `"{courier_code}:{service_type}"`, so even placeholder flows no longer teach the old `JNE-REG` style contract.
+- Verification: `npm run lint` (`tsc --noEmit`) exits clean after the alignment pass.
+
+#### Found Bugs
+- **BUG-KA-FE-17 (HIGH)**: The shipment wizard still built the pre-rehaul payload: no `origin_kecamatan_area_id`, no zipcode/lat/long, no `base_shipping_fee_idr`, `is_sandbox` hardcoded `false`, and it expected a nested `{ shipment }` response. Result: even after the backend was fixed, the browser could not create a valid KiriminAja booking payload.
+- **BUG-KA-FE-18 (HIGH)**: Dashboard/detail screens still assumed the old shipment enum and row shape (`quoted`, `payment_failed`, `origin_*`, `destination_*`, `id`, `provider_credential_id`, timeline `new_status`/`note_jsonb`). Result: status rendering drift, broken cancel route, incorrect AWB label assumptions, and drawer hydration/type drift against the current backend payload.
+
+#### Fixes
+- **FIX-KA-FE-17**: Wizard payload + submit/result flow updated to the backend contract. The UI now gathers the required booking fields, forwards quote base fee, lets the operator choose sandbox mode, uses the credential override header when present, and handles both immediate-AWB and AWB-pending success paths correctly.
+- **FIX-KA-FE-18**: Dashboard/detail/types were re-aligned to the canonical shipment contract and the current history shape. Cancel now hits the real route, AWB label handling uses the hosted URL response, and canonical statuses render consistently across the dashboard and drawer.
 
 ### 2026-10-07.r001 — Tenancy Approval + Frontend Scaffold (View Definitions, Routing Plan, UI Invariants locked)
 **Scope**: Full UI scaffolding spec lock-in (AppView variants, routes, permission mapping, 5 views components list, shared components list, UI invariant patterns). **Implementation (actual components/hooks/utils files) deferred to next rev (this rev = spec + planning only).**
@@ -245,6 +369,37 @@ Shared hook `useShipmentPackageValidator()` — reused by Rate Calculator Packag
 
 #### Fixes
 - `thirdplilApi.ts` r004 had `SUPABASE_PUBLISHABLE_KEY`/`SUPABASE_ANON_KEY` as fallback, but some Vite setups use `VITE_SUPABASE_ANON_KEY` only. **Bundled fix**: priority order `VITE_SUPABASE_ANON_KEY || VITE_SUPABASE_PUBLISHABLE_KEY || VITE_SUPABASE_ANON_KEY` (alias fallback, safe).
+
+---
+
+### 2026-10-21.r016 — Frontend NONE this rev (Backend doc reconciliation: KiriminAja adapter audited vs official MitraAPI spec)
+**Backend twin changelog (paired)**: [kiriminaja-changelogs.md § 2026-10-21.r012](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L80-L106)
+
+#### Changes
+- **No frontend source changed** — this entry records the paired backend revision so the two changelogs stay in step.
+- Backend rev `2026-10-21.r012` audited `_shared/thirdplil/providers/kiriminaja.ts` against the official KiriminAja MitraAPI spec (`api-reference.json`) plus a live sandbox probe, and found the adapter targets a **non-existent API shape** (Bearer-only auth, no `/api/v2` base suffix, all 11 endpoint paths invented, envelope key `results`, no webhook event id). Full rewrite plan: `09-mitraapi-adapter-reconciliation.md`.
+- Backend also reconciled the umbrella docs `07-auth-tenancy-design.md` (new §0 Schema Map; `lova_il.current_subscriber_id`) and `08-onboarding-and-openapi-workflows.md`. Repo naming in those docs updated from `ThirdPLILFrontend` → `LOVAIntegrationLayerFrontend`.
+
+#### Found Bugs
+- (none for this rev — backend-only findings, tracked as BUG-THIRDPLIL-07 through -16)
+
+#### Fixes
+- (none for this rev)
+
+---
+
+### 2026-10-20.r016b — Frontend repo rename + IL schema consolidation notes
+**Backend twin changelog (paired)**: [webstoresupabase-migration-fix-plan.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/webstoresupabase-migration-fix-plan.md)
+
+#### Changes
+- **No frontend source changed** in this rev. Recorded for traceability: the backend migration rehaul consolidated the old `0001`–`0009` ThirdPLIL family into `lova_il` + `thirdpl_il` + `pgil`, renamed the session GUC to `lova_il.current_subscriber_id`, and dropped the `private` schema. The frontend repo is now **`LOVAIntegrationLayerFrontend`** (unified ThirdPLIL + PGIL UI) — any code or doc that still calls `thirdpl_il.verify_consumer_api_key(sha256, ip)` or reads `profiles.uid` is stale.
+- **Follow-up (not done in this rev)**: the frontend `src/types/thirdplil.ts` and `src/utils/thirdplilApi.ts` still mirror the pre-rewrite provider contract; they must be re-synced after the backend adapter rewrite (Phase D of doc 09) lands.
+
+#### Found Bugs
+- (none for this rev)
+
+#### Fixes
+- (none for this rev)
 
 ---
 

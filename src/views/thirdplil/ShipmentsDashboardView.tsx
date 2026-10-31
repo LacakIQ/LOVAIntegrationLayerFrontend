@@ -24,24 +24,22 @@ import type { BannerMessage, ShipmentHeader, ShipmentStatus } from '../../types/
 function toneForStatus(s: ShipmentStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   switch (s) {
     case 'delivered': return 'success';
-    case 'paid':
-    case 'pickup_completed':
-    case 'received_at_origin':
-    case 'received_at_destination':
+    case 'problem_resolved':
+    case 'awb_assigned':
+    case 'pickup_requested':
+    case 'pickup_scheduled':
+    case 'courier_picked_up':
     case 'in_transit':
     case 'out_for_delivery':
-    case 'pickup_enroute':
       return 'info';
-    case 'quoted':
-    case 'awaiting_payment':
-    case 'pickup_scheduled':
-    case 'pickup_driver_assigned':
     case 'draft':
+    case 'provider_submitted':
+    case 'attempt_failed':
+    case 'return_in_progress':
       return 'warning';
     case 'problem_pending':
     case 'lost':
     case 'damaged':
-    case 'payment_failed':
       return 'danger';
     case 'canceled':
     case 'returned':
@@ -54,21 +52,19 @@ function toneForStatus(s: ShipmentStatus): 'success' | 'warning' | 'danger' | 'i
 function statusLabel(s: ShipmentStatus): string {
   const map: Record<ShipmentStatus, string> = {
     draft: 'Draft',
-    quoted: 'Quoted',
-    awaiting_payment: 'Awaiting Payment',
-    paid: 'Paid',
-    payment_failed: 'Payment Failed',
+    provider_submitted: 'Provider Submitted',
+    awb_assigned: 'AWB Assigned',
+    pickup_requested: 'Pickup Requested',
     pickup_scheduled: 'Pickup Scheduled',
-    pickup_driver_assigned: 'Driver Assigned',
-    pickup_enroute: 'Pickup Enroute',
-    pickup_completed: 'Pickup Completed',
-    received_at_origin: 'Received at Origin Hub',
+    courier_picked_up: 'Courier Picked Up',
     in_transit: 'In Transit',
-    received_at_destination: 'Received at Dest Hub',
     out_for_delivery: 'Out For Delivery',
+    attempt_failed: 'Attempt Failed',
     delivered: 'Delivered',
+    return_in_progress: 'Return In Progress',
     returned: 'Returned to Sender',
     problem_pending: 'Problem Pending',
+    problem_resolved: 'Problem Resolved',
     canceled: 'Canceled',
     lost: 'Lost',
     damaged: 'Damaged',
@@ -77,10 +73,10 @@ function statusLabel(s: ShipmentStatus): string {
 }
 
 const STATUS_ORDER: ShipmentStatus[] = [
-  'draft', 'quoted', 'awaiting_payment', 'paid', 'payment_failed',
-  'pickup_scheduled', 'pickup_driver_assigned', 'pickup_enroute', 'pickup_completed',
-  'received_at_origin', 'in_transit', 'received_at_destination', 'out_for_delivery',
-  'delivered', 'returned', 'problem_pending', 'canceled', 'lost', 'damaged',
+  'draft', 'provider_submitted', 'awb_assigned', 'pickup_requested', 'pickup_scheduled',
+  'courier_picked_up', 'in_transit', 'out_for_delivery', 'attempt_failed',
+  'delivered', 'return_in_progress', 'returned', 'problem_pending', 'problem_resolved',
+  'canceled', 'lost', 'damaged',
 ];
 
 export default function ShipmentsDashboardView() {
@@ -116,9 +112,10 @@ export default function ShipmentsDashboardView() {
       if (filterStatus !== 'all' && s.status !== filterStatus) return false;
       if (!ql) return true;
       return [
-        s.awb_no, s.transaction_id, String(s.id),
-        s.origin_address_line, s.destination_address_line,
-        s.origin_contact_name, s.destination_contact_name,
+          s.awb_no, s.transaction_id, String(s.shipment_id),
+          s.sender_address, s.recipient_address,
+          s.sender_name, s.recipient_name,
+          s.sender_phone, s.recipient_phone,
         s.courier_service_code, s.courier_service_name,
       ].some((x) => x && String(x).toLowerCase().includes(ql));
     });
@@ -126,7 +123,7 @@ export default function ShipmentsDashboardView() {
 
   const cancelShipment = async (id: number) => {
     setCancellingId(id);
-    const r = await callThirdPLILInternalUI<{ ok: boolean; skipped: boolean; new_status: ShipmentStatus }>(`thirdplil-shipments/${id}/cancel`, { method: 'PATCH', isMutation: true });
+    const r = await callThirdPLILInternalUI<{ ok: boolean; skipped: boolean; new_status: ShipmentStatus }>(`thirdplil-shipments/${id}`, { method: 'DELETE', isMutation: true });
     setCancellingId(null);
     if (!r.ok) { setBanner(r.banner); return; }
     const d = (r.data ?? {}) as { ok?: boolean; skipped?: boolean; skip_reason?: string };
@@ -140,12 +137,12 @@ export default function ShipmentsDashboardView() {
 
   const downloadAwb = async (id: number) => {
     setDownloadingAwbId(id);
-    const r = await callThirdPLILInternalUI<{ url?: string; filename?: string }>(`thirdplil-shipments/${id}/awb-label`, { method: 'GET', query: { redirect: 'false' } });
+    const r = await callThirdPLILInternalUI<{ url?: string; awb_no?: string; provider?: string }>(`thirdplil-shipments/${id}/awb-label`, { method: 'GET', query: { redirect: 'false' } });
     setDownloadingAwbId(null);
     if (!r.ok) { setBanner(r.banner); return; }
     const d = (r.data ?? {}) as { url?: string };
     if (!d.url) {
-      setBanner({ tone: 'warning', title: 'AWB label belum tersedia.', body: 'Beberapa provider membuat AWB label setelah status "Pickup Completed" / Paid. Coba beberapa saat lagi.' });
+      setBanner({ tone: 'warning', title: 'AWB label belum tersedia.', body: 'KiriminAja belum mengembalikan URL label. Tunggu webhook/polling sampai AWB tersedia, lalu coba lagi.' });
       return;
     }
     try {
@@ -289,9 +286,9 @@ export default function ShipmentsDashboardView() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((s) => (
-                    <tr key={s.id} onClick={() => setDrawerShipmentId(Number(s.id))} className="hover:bg-blue-50/50 cursor-pointer transition">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">#{s.id}</td>
+                    filtered.map((s) => (
+                      <tr key={s.shipment_id} onClick={() => setDrawerShipmentId(Number(s.shipment_id))} className="hover:bg-blue-50/50 cursor-pointer transition">
+                        <td className="px-4 py-3 font-mono text-xs text-gray-500">#{s.shipment_id}</td>
                       <td className="px-4 py-3 font-semibold text-blue-600">{s.awb_no ?? <span className="text-gray-300 italic font-normal">pending</span>}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <Badge tone={toneForStatus(s.status)} label={statusLabel(s.status)} />
@@ -302,25 +299,25 @@ export default function ShipmentsDashboardView() {
                         <p className="font-mono text-gray-500">{s.courier_service_code ?? '-'}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600 max-w-xs">
-                        <p className="line-clamp-1"><span className="text-blue-600 font-semibold">📍</span> {s.origin_address_line}</p>
-                        <p className="line-clamp-1 mt-0.5"><span className="text-green-600 font-semibold">🎯</span> {s.destination_address_line}</p>
+                          <p className="line-clamp-1"><span className="text-blue-600 font-semibold">📍</span> {s.sender_address}</p>
+                          <p className="line-clamp-1 mt-0.5"><span className="text-green-600 font-semibold">🎯</span> {s.recipient_address}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600">
-                        <p className="font-semibold text-gray-700">{s.origin_contact_name} → {s.destination_contact_name}</p>
-                        <p className="font-mono text-gray-400">{s.origin_contact_phone} → {s.destination_contact_phone}</p>
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-800 whitespace-nowrap">{idr(s.grand_total_fee_idr)}</td>
+                          <p className="font-semibold text-gray-700">{s.sender_name ?? s.sender_contact_name ?? '-'} → {s.recipient_name ?? s.recipient_contact_name ?? '-'}</p>
+                          <p className="font-mono text-gray-400">{s.sender_phone ?? s.sender_contact_phone ?? '-'} → {s.recipient_phone ?? s.recipient_contact_phone ?? '-'}</p>
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-gray-800 whitespace-nowrap">{idr(s.grand_total_idr ?? s.grand_total_fee_idr ?? null)}</td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-wrap gap-1 justify-end">
-                          <button onClick={() => setDrawerShipmentId(Number(s.id))} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs'}>
+                            <button onClick={() => setDrawerShipmentId(Number(s.shipment_id))} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs'}>
                             Details
                           </button>
-                          <button onClick={() => void downloadAwb(Number(s.id))} disabled={downloadingAwbId === Number(s.id) || !s.awb_no} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs disabled:opacity-50'}>
-                            {downloadingAwbId === Number(s.id) ? <Loader2 size={13} className="mr-1 inline align-text-top animate-spin" /> : <Download size={13} className="mr-1 inline align-text-top" />}
+                            <button onClick={() => void downloadAwb(Number(s.shipment_id))} disabled={downloadingAwbId === Number(s.shipment_id) || !s.awb_no} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs disabled:opacity-50'}>
+                              {downloadingAwbId === Number(s.shipment_id) ? <Loader2 size={13} className="mr-1 inline align-text-top animate-spin" /> : <Download size={13} className="mr-1 inline align-text-top" />}
                             AWB
                           </button>
-                          <button onClick={() => void cancelShipment(Number(s.id))} disabled={cancellingId === Number(s.id)} className="!bg-red-50 hover:!bg-red-100 text-red-700 border border-red-200 rounded-xl px-2 py-1.5 text-xs disabled:opacity-50 transition">
-                            {cancellingId === Number(s.id) ? <Loader2 size={13} className="inline align-text-top animate-spin" /> : 'Cancel'}
+                            <button onClick={() => void cancelShipment(Number(s.shipment_id))} disabled={cancellingId === Number(s.shipment_id)} className="!bg-red-50 hover:!bg-red-100 text-red-700 border border-red-200 rounded-xl px-2 py-1.5 text-xs disabled:opacity-50 transition">
+                              {cancellingId === Number(s.shipment_id) ? <Loader2 size={13} className="inline align-text-top animate-spin" /> : 'Cancel'}
                           </button>
                         </div>
                       </td>

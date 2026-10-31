@@ -12,26 +12,24 @@ export interface ShipmentDetailDrawerProps {
 }
 
 interface ShipmentStatusHistoryRow {
-  id: number;
+  history_id: number;
   shipment_id: number;
-  prior_status: ShipmentStatus | null;
-  new_status: ShipmentStatus;
-  reason?: string | null;
-  triggered_by?: 'ui_user' | 'consumer_api' | 'provider_webhook' | 'cron_worker' | 'system' | string | null;
-  actor_profile_id?: number | null;
-  provider_event_ref?: string | null;
-  note_jsonb?: Record<string, unknown> | null;
+  status: ShipmentStatus;
+  transition_reason?: unknown;
+  source?: 'ui_user' | 'consumer_api' | 'provider_webhook' | 'cron_worker' | 'system' | string | null;
+  actor?: string | null;
+  raw_provider_status?: string | null;
   occurred_at: string;
-  created_at?: string | null;
 }
 
 function statusDotColor(s: ShipmentStatus) {
   switch (s) {
     case 'delivered': return 'bg-green-500 text-white';
-    case 'paid':
-    case 'pickup_completed':
-    case 'received_at_origin':
-    case 'received_at_destination':
+    case 'problem_resolved':
+    case 'awb_assigned':
+    case 'pickup_requested':
+    case 'pickup_scheduled':
+    case 'courier_picked_up':
     case 'in_transit':
     case 'out_for_delivery':
       return 'bg-blue-500 text-white';
@@ -43,9 +41,9 @@ function statusDotColor(s: ShipmentStatus) {
     case 'returned':
       return 'bg-gray-500 text-white';
     case 'draft':
-    case 'quoted':
-    case 'awaiting_payment':
-    case 'pickup_scheduled':
+    case 'provider_submitted':
+    case 'attempt_failed':
+    case 'return_in_progress':
       return 'bg-amber-500 text-white';
     default: return 'bg-gray-300 text-gray-700';
   }
@@ -159,27 +157,25 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
     if (!s) return 'neutral';
     switch (s) {
       case 'delivered': return 'success';
-      case 'paid':
-      case 'pickup_completed':
-      case 'received_at_origin':
-      case 'received_at_destination':
+      case 'problem_resolved':
+      case 'awb_assigned':
+      case 'pickup_requested':
+      case 'pickup_scheduled':
+      case 'courier_picked_up':
       case 'in_transit':
       case 'out_for_delivery':
-      case 'pickup_driver_assigned':
-      case 'pickup_enroute':
         return 'info';
       case 'problem_pending':
       case 'lost':
       case 'damaged':
-      case 'payment_failed':
         return 'danger';
       case 'canceled':
       case 'returned':
         return 'neutral';
       case 'draft':
-      case 'quoted':
-      case 'awaiting_payment':
-      case 'pickup_scheduled':
+      case 'provider_submitted':
+      case 'attempt_failed':
+      case 'return_in_progress':
         return 'warning';
       default: return 'neutral';
     }
@@ -190,7 +186,7 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
   const headerTxn = shipment?.transaction_id ?? '';
   const headerAwb = shipment?.awb_no;
   const headerService = shipment?.courier_service_name ?? '(courier belum ditentukan)';
-  const headerId = shipment?.id ?? (typeof shipmentId === 'bigint' ? Number(shipmentId) : (shipmentId ?? 0));
+  const headerId = shipment?.shipment_id ?? (typeof shipmentId === 'bigint' ? Number(shipmentId) : (shipmentId ?? 0));
   const headerCreatedAt = shipment?.created_at;
 
   return (
@@ -270,8 +266,20 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
             <Section kicker="Summary · Address Block" title="Origin → Destination Address & Contacts" subtitle="Origin always merchant (subscriber default pickup address). Destination always buyer (WMS / Webstore order shipping address row).">
               <div className="grid md:grid-cols-2 gap-4">
                 {[
-                  { title: 'Origin (Pengirim)', sub: `${shipment.origin_contact_name} · ${shipment.origin_contact_phone}`, body: shipment.origin_address_line, email: shipment.origin_contact_email, tone: 'info' as const },
-                  { title: 'Destination (Penerima)', sub: `${shipment.destination_contact_name} · ${shipment.destination_contact_phone}`, body: shipment.destination_address_line, email: shipment.destination_contact_email, tone: 'success' as const },
+                    {
+                      title: 'Origin (Pengirim)',
+                      sub: `${shipment.sender_name ?? shipment.sender_contact_name ?? '—'} · ${shipment.sender_phone ?? shipment.sender_contact_phone ?? '—'}`,
+                      body: shipment.sender_address,
+                      email: shipment.sender_contact_email,
+                      tone: 'info' as const,
+                    },
+                    {
+                      title: 'Destination (Penerima)',
+                      sub: `${shipment.recipient_name ?? shipment.recipient_contact_name ?? '—'} · ${shipment.recipient_phone ?? shipment.recipient_contact_phone ?? '—'}`,
+                      body: shipment.recipient_address,
+                      email: shipment.recipient_contact_email,
+                      tone: 'success' as const,
+                    },
                 ].map((c) => (
                   <div key={c.title} className="rounded-2xl border border-gray-200 p-5 hover:bg-gray-50/60">
                     <div className="flex items-center justify-between mb-3">
@@ -292,7 +300,14 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
                   { label: 'Total Actual W', val: `${((shipment.total_actual_weight_g ?? 0) / 1000).toFixed(2)} kg`, tone: 'neutral' as const },
                   { label: 'Total Billed W', val: `${((shipment.total_billed_weight_g ?? 0) / 1000).toFixed(2)} kg`, tone: 'info' as const },
                   { label: shipment.is_insurance_enabled ? `Insurance (aktif)` : 'Insurance (tidak aktif)', val: shipment.insurance_fee_idr ? `Rp ${new Intl.NumberFormat('id-ID').format(parseFloat(shipment.insurance_fee_idr))}` : 'Rp 0', tone: shipment.is_insurance_enabled ? ('info' as const) : ('neutral' as const) },
-                  { label: 'GRAND TOTAL', val: 'Rp ' + (shipment.grand_total_fee_idr ? new Intl.NumberFormat('id-ID').format(parseFloat(shipment.grand_total_fee_idr)) : '?'), tone: 'success' as const, highlight: true },
+                    {
+                      label: 'GRAND TOTAL',
+                      val: (shipment.grand_total_idr ?? shipment.grand_total_fee_idr) != null
+                        ? 'Rp ' + new Intl.NumberFormat('id-ID').format(parseFloat(String(shipment.grand_total_idr ?? shipment.grand_total_fee_idr ?? '0')))
+                        : '?',
+                      tone: 'success' as const,
+                      highlight: true,
+                    },
                 ].map((r) => (
                   <div key={r.label} className={'rounded-2xl p-4 border ' + (r.highlight ? 'border-green-300 bg-green-50/50 ring-1 ring-inset ring-green-400/40' : 'border-gray-200 bg-white')}>
                     <Badge tone={r.tone} label={r.label} />
@@ -393,21 +408,21 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
 
         {tab === 'pickup' && shipment && (
           <div className="px-6 pb-8 space-y-5">
-            <Section kicker="Tab ③ · Pickup" title="Jadwal Pickup & Driver Info" subtitle="Window dipilih wizard Step 4; status changed events pickup.driver_assigned / pickup.enroute / pickup.completed dari inbound webhook.">
+            <Section kicker="Tab ③ · Pickup" title="Jadwal Pickup & Booking State" subtitle="Window dipilih wizard Step 4. Timeline sekarang mengikuti status backend canonical (`pickup_requested`, `pickup_scheduled`, `courier_picked_up`) alih-alih event driver-assigned lama.">
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="rounded-2xl border border-gray-200 p-5">
                   <div className="flex items-center gap-2 mb-3"><CalendarClock size={18} className="text-blue-600" /><p className="font-semibold">Window Dijadwalkan</p></div>
-                  {shipment.pickup_date_local || timelineRows.some((h) => h.new_status === 'pickup_scheduled') ? (
+                  {shipment.pickup_date_local || timelineRows.some((h) => h.status === 'pickup_scheduled') ? (
                     <>
                       <p className="text-2xl font-bold text-gray-900">
-                        {shipment.pickup_date_local ?? formatTsLocal(timelineRows.find((h) => h.new_status === 'pickup_scheduled')?.occurred_at ?? '').split('·')[0]?.trim()}
+                        {shipment.pickup_date_local ?? formatTsLocal(timelineRows.find((h) => h.status === 'pickup_scheduled')?.occurred_at ?? '').split('·')[0]?.trim()}
                         {shipment.pickup_start_time && shipment.pickup_end_time ? ` · ${shipment.pickup_start_time} — ${shipment.pickup_end_time}` : ''}
                       </p>
                       <p className="mt-1 text-sm text-gray-500 flex items-center gap-2">
-                        {timelineRows.some((h) => h.new_status === 'pickup_completed') ? (
-                          <><Badge tone="success" label="Pickup Completed" /> driver arrived on-time.</>
-                        ) : timelineRows.some((h) => h.new_status === 'pickup_driver_assigned' || h.new_status === 'pickup_enroute') ? (
-                          <><Badge tone="info" label="Driver On Route" /> Driver sedang menuju lokasi pickup.</>
+                        {timelineRows.some((h) => h.status === 'courier_picked_up') ? (
+                          <><Badge tone="success" label="Courier Picked Up" /> Paket sudah diambil kurir.</>
+                        ) : timelineRows.some((h) => h.status === 'pickup_requested') ? (
+                          <><Badge tone="info" label="Pickup Requested" /> Booking sudah diterima, menunggu pickup berlangsung.</>
                         ) : (
                           <><Badge tone="warning" label="Pickup Scheduled" /> Menunggu window pickup dimulai.</>
                         )}
@@ -428,37 +443,18 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
                   )}
                 </div>
                 <div className="rounded-2xl border border-gray-200 p-5">
-                  <div className="flex items-center gap-2 mb-3"><Clock size={18} className="text-green-600" /><p className="font-semibold">Driver Info (saat assigned)</p></div>
-                  {(() => {
-                    const assignRow = timelineRows.find((h) => h.new_status === 'pickup_driver_assigned');
-                    const note = assignRow?.note_jsonb;
-                    const driverName = note && typeof note === 'object' && 'driver_name' in note ? String((note as Record<string, unknown>).driver_name) : null;
-                    const driverPhone = note && typeof note === 'object' && 'driver_phone' in note ? String((note as Record<string, unknown>).driver_phone) : null;
-                    const vehicleNo = note && typeof note === 'object' && 'vehicle_no' in note ? String((note as Record<string, unknown>).vehicle_no) : null;
-                    if (!driverName && !assignRow) {
-                      return (
-                        <>
-                          <p className="text-xl font-semibold text-gray-400">Belum ada driver assigned</p>
-                          <p className="mt-1 text-sm text-gray-500">Akan terisi ketika inbound webhook KA event pickup.driver_assigned masuk → transition_status_rpc.</p>
-                        </>
-                      );
-                    }
-                    return (
-                      <>
-                        <p className="text-xl font-bold text-gray-900">{driverName ?? '(Driver name not in note_jsonb)'}</p>
-                        {(driverPhone || vehicleNo) && (
-                          <p className="mt-1 text-sm text-gray-500">
-                            {driverPhone ? `📱 ${driverPhone}` : ''}
-                            {driverPhone && vehicleNo ? ' · ' : ''}
-                            {vehicleNo ? `🚚 Plat nomor: ${vehicleNo}` : ''}
-                          </p>
-                        )}
-                        {assignRow?.occurred_at && (
-                          <p className="mt-4 text-xs text-gray-500">Assigned at: {formatTsLocal(assignRow.occurred_at)}</p>
-                        )}
-                      </>
-                    );
-                  })()}
+                  <div className="flex items-center gap-2 mb-3"><Clock size={18} className="text-green-600" /><p className="font-semibold">Booking / AWB Progress</p></div>
+                  <p className="text-xl font-bold text-gray-900">{shipment.awb_no ?? 'AWB belum tersedia'}</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {shipment.awb_no
+                      ? 'AWB sudah tersimpan di shipment. Gunakan tombol Download AWB Label jika URL label sudah tersedia.'
+                      : 'KiriminAja bisa mengembalikan AWB langsung saat booking atau belakangan lewat webhook. Jika status masih provider_submitted, tunggu webhook/polling.'}
+                  </p>
+                  <div className="mt-4 space-y-2 text-sm text-gray-600">
+                    <p>Provider order id: <span className="font-mono text-xs">{shipment.provider_order_id ?? '—'}</span></p>
+                    <p>Partner order ids: <span className="font-mono text-xs">{shipment.partner_order_ids?.join(', ') || '—'}</span></p>
+                    <p>Status terakhir: <span className="font-semibold">{shipment.status}</span></p>
+                  </div>
                 </div>
               </div>
             </Section>
@@ -485,25 +481,26 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
                 <ol className="relative border-l-2 border-gray-200 pl-6 space-y-6 ml-3">
                   {timelineRows.map((h, i) => {
                     const isLast = i === timelineRows.length - 1;
-                    const prior = h.prior_status;
-                    const arrowLabel = prior ? `${prior} → ${h.new_status}` : `init → ${h.new_status}`;
-                    const noteStr = h.reason ?? (h.note_jsonb && typeof h.note_jsonb === 'object' ? JSON.stringify(h.note_jsonb) : null) ?? null;
+                    const noteStr = h.transition_reason != null
+                      ? (typeof h.transition_reason === 'string' ? h.transition_reason : JSON.stringify(h.transition_reason))
+                      : null;
                     return (
-                      <li key={h.id} className="relative">
-                        <span className={`absolute -left-[37px] top-1 flex items-center justify-center w-6 h-6 rounded-full ${statusDotColor(h.new_status)}`}>
-                          {h.new_status === 'delivered' ? <CheckCircle2 size={12} /> : (h.new_status === 'canceled' || h.new_status === 'lost' || h.new_status === 'damaged' || h.new_status === 'payment_failed' ? <XCircle size={12} /> : (h.new_status === 'problem_pending' ? <AlertCircle size={12} /> : <ArrowRight size={12} />))}
+                      <li key={h.history_id} className="relative">
+                        <span className={`absolute -left-[37px] top-1 flex items-center justify-center w-6 h-6 rounded-full ${statusDotColor(h.status)}`}>
+                          {h.status === 'delivered' ? <CheckCircle2 size={12} /> : (h.status === 'canceled' || h.status === 'lost' || h.status === 'damaged' ? <XCircle size={12} /> : (h.status === 'problem_pending' ? <AlertCircle size={12} /> : <ArrowRight size={12} />))}
                         </span>
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div>
                             <p className={'font-semibold ' + (isLast ? 'text-green-700' : 'text-gray-900')}>
-                              {arrowLabel}{h.provider_event_ref ? ` · provider ref: ${h.provider_event_ref}` : ''}
+                              {h.status}
+                              {h.raw_provider_status ? ` · provider raw: ${h.raw_provider_status}` : ''}
                             </p>
-                            <p className="text-xs text-gray-500 mt-0.5">triggered_by: {triggerLabel(h.triggered_by)}{h.actor_profile_id ? ` · profile_id #${h.actor_profile_id}` : ''}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">source: {triggerLabel(h.source)}{h.actor ? ` · actor: ${h.actor}` : ''}</p>
                             {noteStr && <p className="mt-1 text-xs text-gray-600 italic">💡 {noteStr}</p>}
                           </div>
                           <div className="text-right">
                             <p className="font-mono text-xs text-gray-400">{formatTsLocal(h.occurred_at)}</p>
-                            <p className="mt-1"><Badge tone={statusToneFor(h.new_status)} label={h.new_status} /></p>
+                            <p className="mt-1"><Badge tone={statusToneFor(h.status)} label={h.status} /></p>
                           </div>
                         </div>
                       </li>

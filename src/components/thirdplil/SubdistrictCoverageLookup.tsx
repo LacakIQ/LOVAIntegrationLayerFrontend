@@ -1,60 +1,97 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, MapPin, Search as SearchIcon } from 'lucide-react';
 import { STYLES, Section, Badge } from '../ui/STYLES.tsx';
 import SubTabs from '../SubTabs.tsx';
-import type { CoverageAreaLevel, ThirdPLILCoverageArea } from '../../types/thirdplil.ts';
+import type { CoverageAreaLevel, EnvToggle, ThirdPLILCoverageArea } from '../../types/thirdplil.ts';
+import { callThirdPLILInternalUI } from '../../utils/thirdplilApi.ts';
 
 export interface SubdistrictCoverageLookupProps {
   level: CoverageAreaLevel;
   parentId?: number | null;
+  env?: EnvToggle;
   onSelect?: (area: ThirdPLILCoverageArea) => void;
   selectedIds?: { province?: number | null; city?: number | null; district?: number | null; subdistrict?: number | null };
   showSearchBar?: boolean;
 }
 
-const sampleRows: Record<CoverageAreaLevel, Array<{ id: number; name: string; parent_id: number | null; code: string; full?: string }>> = {
-  province: [
-    { id: 1, parent_id: null, code: 'JK', name: 'DKI Jakarta', full: 'Provinsi DKI Jakarta' },
-    { id: 2, parent_id: null, code: 'JB', name: 'Jawa Barat', full: 'Provinsi Jawa Barat' },
-    { id: 3, parent_id: null, code: 'JT', name: 'Jawa Tengah', full: 'Provinsi Jawa Tengah' },
-    { id: 4, parent_id: null, code: 'JI', name: 'Jawa Timur', full: 'Provinsi Jawa Timur' },
-  ],
-  city: [
-    { id: 101, parent_id: 1, code: 'JKP', name: 'Kota Jakarta Pusat', full: 'DKI Jakarta › Kota Jakarta Pusat' },
-    { id: 102, parent_id: 1, code: 'JKU', name: 'Kota Jakarta Utara', full: 'DKI Jakarta › Kota Jakarta Utara' },
-    { id: 201, parent_id: 2, code: 'BDG', name: 'Kota Bandung', full: 'Jawa Barat › Kota Bandung' },
-    { id: 202, parent_id: 2, code: 'BGR', name: 'Kota Bogor', full: 'Jawa Barat › Kota Bogor' },
-  ],
-  district: [
-    { id: 10101, parent_id: 101, code: 'MEN', name: 'Menteng', full: 'DKI Jakarta › Kota Jakarta Pusat › Menteng' },
-    { id: 10102, parent_id: 101, code: 'GMB', name: 'Gambir', full: 'DKI Jakarta › Kota Jakarta Pusat › Gambir' },
-    { id: 20101, parent_id: 201, code: 'SUK', name: 'Sukajadi', full: 'Jawa Barat › Kota Bandung › Sukajadi' },
-    { id: 20102, parent_id: 201, code: 'AND', name: 'Andir', full: 'Jawa Barat › Kota Bandung › Andir' },
-  ],
-  subdistrict: [
-    { id: 1010101, parent_id: 10101, code: 'MDA', name: 'Menteng Dalam', full: 'DKI Jakarta › Kota Jakarta Pusat › Menteng › Menteng Dalam' },
-    { id: 1010102, parent_id: 10101, code: 'PEG', name: 'Pegangsaan', full: 'DKI Jakarta › Kota Jakarta Pusat › Menteng › Pegangsaan' },
-    { id: 1010201, parent_id: 10102, code: 'PET', name: 'Petojo Selatan', full: 'DKI Jakarta › Kota Jakarta Pusat › Gambir › Petojo Selatan' },
-    { id: 2010101, parent_id: 20101, code: 'SKJ', name: 'Sukajadi', full: 'Jawa Barat › Kota Bandung › Sukajadi › Sukajadi' },
-  ],
-};
-
 export default function SubdistrictCoverageLookup({
+  parentId,
+  env = 'production',
   showSearchBar = true,
   selectedIds = { province: null, city: null, district: null, subdistrict: null },
   onSelect,
 }: SubdistrictCoverageLookupProps) {
   const [tab, setTab] = useState<'province' | 'city' | 'district' | 'subdistrict'>('province');
   const [q, setQ] = useState('');
+  const [rows, setRows] = useState<ThirdPLILCoverageArea[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [pathIds, setPathIds] = useState<{ province?: number | null; city?: number | null; district?: number | null; subdistrict?: number | null }>(selectedIds);
 
   const levels: Array<{ id: 'province' | 'city' | 'district' | 'subdistrict'; label: string }> = [
     { id: 'province', label: '① Provinsi' },
     { id: 'city', label: '② Kota / Kab' },
     { id: 'district', label: '③ Kecamatan' },
-    { id: 'subdistrict', label: '④ Kelurahan' },
+    { id: 'subdistrict', label: '④ Kelurahan (opsional)' },
   ];
 
-  const rows = (sampleRows[tab] ?? []).filter((r) => (q ? r.name.toLowerCase().includes(q.toLowerCase()) || r.code.toLowerCase().includes(q.toLowerCase()) : true));
+  useEffect(() => {
+    setPathIds((prev) => ({ ...prev, ...selectedIds }));
+  }, [selectedIds]);
+
+  const parentIdForTab = useMemo(() => {
+    if (tab === 'city') return pathIds.province ?? parentId ?? null;
+    if (tab === 'district') return pathIds.city ?? parentId ?? null;
+    if (tab === 'subdistrict') return pathIds.district ?? parentId ?? null;
+    return null;
+  }, [parentId, pathIds, tab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (tab !== 'province' && !(parentIdForTab && parentIdForTab > 0)) {
+        setRows([]);
+        setWarning(
+          tab === 'city'
+            ? 'Pilih provinsi dulu untuk memuat kota/kabupaten.'
+            : tab === 'district'
+              ? 'Pilih kota/kabupaten dulu untuk memuat kecamatan.'
+              : 'Pilih kecamatan dulu untuk memuat kelurahan.'
+        );
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setWarning(null);
+      const res = await callThirdPLILInternalUI<ThirdPLILCoverageArea[]>('thirdplil-admin-coverage-sync', {
+        method: 'GET',
+        query: {
+          env,
+          level: tab,
+          parent_id: tab === 'province' ? undefined : parentIdForTab,
+          q: q || undefined,
+          limit: 50,
+        },
+      });
+      if (cancelled) return;
+      if (res.ok && Array.isArray(res.data)) {
+        setRows(res.data);
+        setWarning(
+          res.warnings?.[0]
+          ?? (res.data.length === 0
+            ? `Belum ada cache ${tab} untuk query ini. Jalankan Coverage sync lalu coba lagi.`
+            : null)
+        );
+      } else {
+        setRows([]);
+        setWarning(res.banner.body || 'Coverage cache lookup gagal. Periksa credential, auth, atau jalankan sync ulang.');
+      }
+      setLoading(false);
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [env, parentIdForTab, q, tab]);
 
   return (
     <div className="space-y-4">
@@ -62,15 +99,14 @@ export default function SubdistrictCoverageLookup({
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">
-              Shared Component · Coverage
+              Shared Component · Coverage Cache
             </p>
             <h3 className="mt-1 text-lg font-bold text-gray-900">
               <MapPin size={18} className="mr-2 inline align-text-bottom" />
               Pilih Area (4-Level Cascading)
             </h3>
             <p className="mt-1 text-sm text-gray-500">
-              Provinsi → Kota → Kecamatan → Kelurahan (Subdistrict). Click Kelurahan to emit{' '}
-              <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">onSelect(area)</code> dengan full_path breadcrumb.
+              Provinsi → Kota → Kecamatan (kelurahan opsional). Rows come from the subscriber cache, so zipcode and geo fields are only filled when the backend has real values.
             </p>
           </div>
           {showSearchBar && (
@@ -115,50 +151,81 @@ export default function SubdistrictCoverageLookup({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
+              {loading && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                    Memuat coverage {tab}...
+                  </td>
+                </tr>
+              )}
               {rows.map((row) => {
-                const area: ThirdPLILCoverageArea = {
-                  id: row.id,
-                  level: tab,
-                  parent_id: row.parent_id,
-                  code: row.code,
-                  name: row.name,
-                  full_path: row.full ?? null,
+                const area: ThirdPLILCoverageArea = row;
+                // Both kecamatan and kelurahan rows are valid final selections; deeper
+                // levels are optional. Selecting a district keeps the same emitted shape.
+                const selectable = tab === 'subdistrict' || tab === 'district';
+                const selectArea = (a: ThirdPLILCoverageArea) => {
+                  setPathIds((prev) => tab === 'district'
+                    ? { ...prev, district: a.id, subdistrict: null }
+                    : { ...prev, subdistrict: a.id });
+                  onSelect?.(a);
                 };
                 return (
                   <tr
                     key={row.id}
-                    className={tab === 'subdistrict' ? 'hover:bg-blue-50/60 cursor-pointer transition' : 'hover:bg-gray-50'}
-                    onClick={() => tab === 'subdistrict' && onSelect && onSelect(area)}
+                    className={selectable ? 'hover:bg-blue-50/60 cursor-pointer transition' : 'hover:bg-gray-50'}
+                    onClick={() => { if (selectable) selectArea(area); }}
                   >
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">{row.id}</td>
                     <td className="px-4 py-3"><Badge tone="neutral" label={tab} /></td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">{row.code}</td>
                     <td className="px-4 py-3 font-semibold text-gray-900">{row.name}</td>
-                    <td className="px-4 py-3 text-gray-500">{row.full}</td>
+                    <td className="px-4 py-3 text-gray-500">{row.full_path ?? '—'}</td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (tab === 'subdistrict' && onSelect) onSelect(area);
-                          else setTab(levels[levels.findIndex((l) => l.id === tab) + 1]?.id ?? tab);
-                        }}
-                        className={
-                          tab === 'subdistrict'
-                            ? STYLES.buttonPrimary + ' !py-1.5 !text-xs'
-                            : STYLES.buttonSecondary + ' !py-1.5 !text-xs'
-                        }
-                      >
-                        {tab === 'subdistrict' ? 'Pilih Kelurahan ini' : 'Lanjut'}
-                        <ChevronRight size={14} className="ml-1 inline align-text-top" />
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {tab === 'subdistrict' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); selectArea(area); }}
+                            className={STYLES.buttonPrimary + ' !py-1.5 !text-xs'}
+                          >
+                            Pilih Kelurahan ini
+                            <ChevronRight size={14} className="ml-1 inline align-text-top" />
+                          </button>
+                        )}
+                        {tab === 'district' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); selectArea(area); }}
+                            className={STYLES.buttonPrimary + ' !py-1.5 !text-xs'}
+                          >
+                            Pilih Kecamatan ini
+                            <ChevronRight size={14} className="ml-1 inline align-text-top" />
+                          </button>
+                        )}
+                        {tab !== 'subdistrict' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPathIds((prev) => {
+                                if (tab === 'province') return { province: area.id, city: null, district: null, subdistrict: null };
+                                if (tab === 'city') return { ...prev, city: area.id, district: null, subdistrict: null };
+                                return { ...prev, district: area.id, subdistrict: null };
+                              });
+                              setTab(levels[levels.findIndex((l) => l.id === tab) + 1]?.id ?? tab);
+                            }}
+                            className={STYLES.buttonSecondary + ' !py-1.5 !text-xs'}
+                          >
+                            {tab === 'district' ? 'Kelurahan (opsional)' : 'Lanjut'}
+                            <ChevronRight size={14} className="ml-1 inline align-text-top" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
               })}
-              {rows.length === 0 && (
+              {!loading && rows.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                    Tidak ada area untuk pencarian &quot;{q}&quot;.
+                    {warning ?? `Tidak ada area untuk pencarian "${q}".`}
                   </td>
                 </tr>
               )}
@@ -167,9 +234,9 @@ export default function SubdistrictCoverageLookup({
         </div>
 
         <div className={'mt-4 p-4 rounded-xl ' + STYLES.bannerInfo}>
-          <p className="font-semibold text-sm">Placeholder implementation — 16 sample rows per level</p>
+          <p className="font-semibold text-sm">Coverage cache lookup</p>
           <p className="mt-1 text-xs opacity-90">
-            Real r005 akan memanggil <code>callThirdPLILInternalUI('thirdplil-rates?level=…&parent_id=…&q=…')</code> dengan gin_trgm similarity search dari coverage_cache.
+            {warning ?? 'Rows di-load dari subscriber-scoped coverage cache. Jika zipcode atau lat/lng masih kosong, backend memang belum berhasil mengisi field tersebut dari source yang tersedia.'}
           </p>
         </div>
       </div>
@@ -181,10 +248,11 @@ export default function SubdistrictCoverageLookup({
       >
         <pre className="overflow-x-auto rounded-2xl bg-gray-900 p-4 text-xs text-green-300">
 {`interface SubdistrictCoverageLookupProps {
-  level: CoverageAreaLevel;                 // starting level hint
+  level: CoverageAreaLevel;                 // target selection level
   parentId?: number | null;                  // cascade parent
   onSelect?: (area: ThirdPLILCoverageArea) => void;  // emitted only at subdistrict
   selectedIds?: { province? city? district? subdistrict? }; // badge display
+  env?: EnvToggle;                           // default production
   showSearchBar?: boolean;                   // default true
 }`}
         </pre>

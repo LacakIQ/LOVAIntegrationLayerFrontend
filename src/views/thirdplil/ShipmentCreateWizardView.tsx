@@ -13,7 +13,6 @@ import type {
   PackageWithItems,
   PickupWindowOption,
   RateQuote,
-  ShipmentDetail,
   ThirdPLILCoverageArea,
 } from '../../types/thirdplil.ts';
 import { callThirdPLILInternalUI } from '../../utils/thirdplilApi.ts';
@@ -26,10 +25,24 @@ interface ContactBlock {
   contact_email?: string;
   address_line: string;
   subdistrict: ThirdPLILCoverageArea | null;
+  district_area_id: string;
+  zipcode: string;
+  latitude: string;
+  longitude: string;
 }
 
 function emptyContact(): ContactBlock {
-  return { contact_name: '', contact_phone: '', contact_email: '', address_line: '', subdistrict: null };
+  return {
+    contact_name: '',
+    contact_phone: '',
+    contact_email: '',
+    address_line: '',
+    subdistrict: null,
+    district_area_id: '',
+    zipcode: '',
+    latitude: '',
+    longitude: '',
+  };
 }
 
 function emptyPackage(seq: number): PackageWithItems {
@@ -64,6 +77,50 @@ function formatIDR(s: string | number | null | undefined): string {
   catch { return 'Rp ' + String(n); }
 }
 
+function contactBlockMissing(block: ContactBlock): string[] {
+  const out: string[] = [];
+  // Kecamatan (district) is the required level; kelurahan is optional. district_area_id is
+  // seeded from the selected area itself (district) or its parent (subdistrict).
+  if (!(Number(block.district_area_id) > 0)) out.push('kecamatan area');
+  if (block.contact_name.trim().length < 2) out.push('full name');
+  if (!/\d/.test(block.contact_phone)) out.push('phone');
+  if (block.address_line.trim().length < 5) out.push('street address');
+  if (!/^\d{4,10}$/.test(block.zipcode.trim())) out.push('zipcode');
+  if (!(block.latitude.trim().length > 0 && Number.isFinite(Number(block.latitude)))) out.push('latitude');
+  if (!(block.longitude.trim().length > 0 && Number.isFinite(Number(block.longitude)))) out.push('longitude');
+  return out;
+}
+
+function packageStepMissing(packages: PackageWithItems[]): string[] {
+  const out: string[] = [];
+  if (packages.length < 1) out.push('at least 1 package');
+  if (packages.length > 20) out.push('max 20 packages');
+
+  const totalActualG = packages.reduce((s, p) => s + (Number.isFinite(Number(p.actual_weight_g)) ? Number(p.actual_weight_g) : 0), 0);
+  const totalItems = packages.reduce((s, p) => s + (p.items?.length ?? 0), 0);
+  const declaredSum = packages.reduce((s, p) => s + (p.items ?? []).reduce((acc, it) => {
+    const unit = Number.parseFloat(String(it.unit_value_idr ?? '0')) || 0;
+    const qty = Number.isFinite(Number(it.qty)) ? Number(it.qty) : 1;
+    return acc + unit * qty;
+  }, 0), 0);
+
+  if (totalActualG < 10) out.push('total actual weight >= 10g');
+  if (totalItems < 1) out.push('at least 1 item');
+  if (totalItems > 50) out.push('max 50 items');
+  if (declaredSum <= 0) out.push('declared total > 0');
+
+  packages.forEach((pkg, pkgIdx) => {
+    if (!(Number(pkg.actual_weight_g) > 0)) out.push(`package ${pkgIdx + 1} weight(g)`);
+    (pkg.items ?? []).forEach((it, itemIdx) => {
+      if (it.name.trim().length < 2) out.push(`package ${pkgIdx + 1} item ${itemIdx + 1} name`);
+      if (!(Number(it.qty) > 0)) out.push(`package ${pkgIdx + 1} item ${itemIdx + 1} qty`);
+      if (!(Number.parseFloat(String(it.unit_value_idr ?? '0')) > 0)) out.push(`package ${pkgIdx + 1} item ${itemIdx + 1} unit value`);
+    });
+  });
+
+  return Array.from(new Set(out));
+}
+
 export default function ShipmentCreateWizardView() {
   const navigate = useNavigate();
   const [step, setStep] = useState<StepId>(1);
@@ -96,21 +153,47 @@ export default function ShipmentCreateWizardView() {
   const [kaPIN, setKaPIN] = useState<string>('');
   const [kaPINWasUsed, setKaPINWasUsed] = useState<boolean>(false);
   const [paymentMethod, setPaymentMethod] = useState<'ka_credit' | 'postpaid' | 'cod'>('postpaid');
+  const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null);
+  const [isSandbox, setIsSandbox] = useState<boolean>(false);
 
   // Prefill from URL query params (navigation from RateCalculator onSelectQuote)
   useEffect(() => {
     const qp = new URLSearchParams(window.location.search);
+    // The originating area may be a kecamatan (district) or a kelurahan (subdistrict);
+    // Rate Calculator forwards the level so district_area_id is seeded correctly
+    // (create requires the kecamatan area id, kelurahan is optional).
+    const pickLevel = (raw: string | null): 'district' | 'subdistrict' => raw === 'district' ? 'district' : 'subdistrict';
     if (qp.get('origin_subdistrict_id')) {
       const oid = parseInt(qp.get('origin_subdistrict_id') || '0', 10);
-      if (oid > 0) setSender((s) => ({ ...s, subdistrict: s.subdistrict ?? { id: oid, level: 'subdistrict', name: '', parent_id: null, code: 'PREFILL' } }));
+      const oLevel = pickLevel(qp.get('origin_level'));
+      if (oid > 0) setSender((s) => ({
+        ...s,
+        subdistrict: s.subdistrict ?? { id: oid, level: oLevel, name: qp.get('origin_name') ?? '', parent_id: null, code: 'PREFILL' },
+        district_area_id: s.district_area_id || (oLevel === 'district' ? String(oid) : ''),
+      }));
     }
     if (qp.get('destination_subdistrict_id')) {
       const did = parseInt(qp.get('destination_subdistrict_id') || '0', 10);
-      if (did > 0) setReceiver((r) => ({ ...r, subdistrict: r.subdistrict ?? { id: did, level: 'subdistrict', name: '', parent_id: null, code: 'PREFILL' } }));
+      const dLevel = pickLevel(qp.get('destination_level'));
+      if (did > 0) setReceiver((r) => ({
+        ...r,
+        subdistrict: r.subdistrict ?? { id: did, level: dLevel, name: qp.get('destination_name') ?? '', parent_id: null, code: 'PREFILL' },
+        district_area_id: r.district_area_id || (dLevel === 'district' ? String(did) : ''),
+      }));
     }
     if (qp.get('courier_service_code')) setSelectedQuote((old) => old ?? { courier_service_code: qp.get('courier_service_code') as string } as RateQuote);
+    if (qp.get('credential_id')) {
+      const cid = parseInt(qp.get('credential_id') || '0', 10);
+      if (cid > 0) setSelectedCredentialId(cid);
+    }
+    if (qp.get('is_sandbox') === '1' || qp.get('is_sandbox') === 'true') setIsSandbox(true);
     if (qp.get('insurance_enabled') === '1') setInsuranceEnabled(true);
     if (qp.get('cod_amount_idr')) { setCodEnabled(true); setCodAmountIDR(qp.get('cod_amount_idr') as string); }
+    if (qp.get('base_fee_idr')) {
+      setSelectedQuote((old) => old
+        ? { ...old, base_fee_idr: old.base_fee_idr ?? (qp.get('base_fee_idr') as string) }
+        : { courier_service_code: qp.get('courier_service_code') as string, base_fee_idr: qp.get('base_fee_idr') as string } as RateQuote);
+    }
     if (qp.get('declared_total_value_idr')) {
       // distributes declared into first package first item unit
       setPackages((ps) => {
@@ -145,13 +228,9 @@ export default function ShipmentCreateWizardView() {
   ];
 
   // Validation helpers
-  const step1Valid = useMemo(() => (
-    !!sender.subdistrict?.id && sender.subdistrict.level === 'subdistrict'
-    && !!receiver.subdistrict?.id && receiver.subdistrict.level === 'subdistrict'
-    && sender.contact_name.trim().length >= 2 && /\d/.test(sender.contact_phone)
-    && receiver.contact_name.trim().length >= 2 && /\d/.test(receiver.contact_phone)
-    && sender.address_line.trim().length >= 5 && receiver.address_line.trim().length >= 5
-  ), [sender, receiver]);
+  const senderMissing = useMemo(() => contactBlockMissing(sender), [sender]);
+  const receiverMissing = useMemo(() => contactBlockMissing(receiver), [receiver]);
+  const step1Valid = senderMissing.length === 0 && receiverMissing.length === 0;
 
   const totalActualG = useMemo(() => packages.reduce((s, p) => s + (Number.isFinite(Number(p.actual_weight_g)) ? Number(p.actual_weight_g) : 0), 0), [packages]);
   const declaredSumIDR = useMemo(() => packages.reduce((s, p) => s + (p.items ?? []).reduce((acc, it) => {
@@ -160,6 +239,7 @@ export default function ShipmentCreateWizardView() {
     return acc + unit * qty;
   }, 0), 0), [packages]);
   const totalItems = useMemo(() => packages.reduce((s, p) => s + (p.items?.length ?? 0), 0), [packages]);
+  const step2Missing = useMemo(() => packageStepMissing(packages), [packages]);
   const step2Valid = useMemo(() => (
     packages.length >= 1 && packages.length <= 20
     && totalActualG >= 10
@@ -185,7 +265,7 @@ export default function ShipmentCreateWizardView() {
   useEffect(() => {
     if (step !== 3) return;
     if (!step1Valid || !step2Valid) {
-      setBanner({ tone: 'warning', title: 'Lengkapi Step 1 & Step 2 dulu', body: 'Origin/destination harus level subdistrict, packages minimal 1, weight minimal 10g.' });
+      setBanner({ tone: 'warning', title: 'Lengkapi Step 1 & Step 2 dulu', body: 'Origin/destination minimal level kecamatan, packages minimal 1, weight minimal 10g.' });
       return;
     }
     (async () => {
@@ -228,7 +308,7 @@ export default function ShipmentCreateWizardView() {
   // Step 4 fetch pickup windows
   useEffect(() => {
     if (step !== 4) return;
-    if (!step1Valid) { setBanner({ tone: 'warning', title: 'Isi Step 1 dulu', body: 'Perlu origin subdistrict untuk cari jadwal pickup.' }); return; }
+    if (!step1Valid) { setBanner({ tone: 'warning', title: 'Isi Step 1 dulu', body: 'Perlu origin kecamatan untuk cari jadwal pickup.' }); return; }
     (async () => {
       setPickupWindowsLoading(true);
       setBanner(null);
@@ -293,13 +373,20 @@ export default function ShipmentCreateWizardView() {
       const originSid = Number(sender.subdistrict?.id ?? 0);
       const destSid = Number(receiver.subdistrict?.id ?? 0);
       const selectedWin = pickupWindows.find((w) => w.window_id === selectedWindowId) ?? null;
-      const payload: CreateShipmentRequest = {
-        transaction_id: '',
-        credential_id: null,
+        const payload: CreateShipmentRequest = {
+          credential_id: selectedCredentialId,
         provider_slug: 'kiriminaja',
-        is_sandbox: false,
+          is_sandbox: isSandbox,
+          origin_kecamatan_area_id: Number(sender.district_area_id),
         origin_subdistrict_id: originSid,
+          origin_zipcode: sender.zipcode.trim(),
+          origin_latitude: Number(sender.latitude),
+          origin_longitude: Number(sender.longitude),
+          destination_kecamatan_area_id: Number(receiver.district_area_id),
         destination_subdistrict_id: destSid,
+          destination_zipcode: receiver.zipcode.trim(),
+          destination_latitude: Number(receiver.latitude),
+          destination_longitude: Number(receiver.longitude),
         origin_address_line: sender.address_line,
         origin_contact_name: sender.contact_name,
         origin_contact_phone: sender.contact_phone,
@@ -309,6 +396,7 @@ export default function ShipmentCreateWizardView() {
         destination_contact_phone: receiver.contact_phone,
         destination_contact_email: receiver.contact_email ?? null,
         selected_courier_service_code: selectedQuote!.courier_service_code,
+          base_shipping_fee_idr: selectedQuote?.base_fee_idr ?? null,
         packages: packages.map((p) => {
           const billed = Math.max(Number(p.actual_weight_g ?? 0), Number(p.volumetric_weight_g ?? 0));
           return {
@@ -346,23 +434,39 @@ export default function ShipmentCreateWizardView() {
       if (paymentMethod !== 'ka_credit') {
         delete (payload as unknown as Record<string, unknown>).ka_credit_pin;
       }
-      const res = await callThirdPLILInternalUI<{ shipment: ShipmentDetail; is_duplicate: boolean; duplicate_of_id?: number | null }>('thirdplil-shipments', {
+        const res = await callThirdPLILInternalUI<Record<string, unknown>>('thirdplil-shipments', {
         method: 'POST',
         isMutation: true,
         timeoutMs: 60000,
+          credentialId: selectedCredentialId,
         body: payload as never,
       });
-      setBanner(res.banner);
-      if (res.ok) {
-        const cast = res.data as { shipment: ShipmentDetail; is_duplicate: boolean; duplicate_of_id?: number | null } | null;
-        const id = cast?.shipment?.id ?? cast?.duplicate_of_id ?? null;
+        if (!res.ok) {
+          setBanner(res.banner);
+          return;
+        }
+        if (res.ok) {
+          const cast = (res.data ?? {}) as Record<string, unknown>;
+          const id = Number(cast.shipment_id ?? res.duplicateOfId ?? 0) || null;
+          const awb = typeof cast.awb_number === 'string' && cast.awb_number.length > 0
+            ? cast.awb_number
+            : (typeof cast.awb_no === 'string' && cast.awb_no.length > 0 ? cast.awb_no : null);
+          const status = typeof cast.status === 'string' ? cast.status : null;
         const dash = getPathForView('kiriminaja-shipments-dashboard');
         const hash = id ? `#drawer-open-id=${id}` : '';
         setTimeout(() => navigate(dash + (hash ? hash : '')), 800);
         setBanner({
-          tone: (cast?.is_duplicate) ? 'info' : 'success',
-          title: cast?.is_duplicate ? 'Shipment sudah pernah dibuat (dedup OK)' : 'Shipment berhasil dibuat!',
-          body: id ? `ID shipment: ${id}. AWB akan diisi otomatis ketika provider create berhasil. Kamu akan diarahkan ke Dashboard...` : 'Berhasil, mengarahkan ke dashboard...',
+            tone: res.isDuplicate ? 'info' : 'success',
+            title: res.isDuplicate
+              ? 'Shipment sudah pernah dibuat (dedup OK)'
+              : awb
+                ? 'Shipment berhasil dibuat dan AWB sudah terbit'
+                : 'Shipment berhasil dibooking, AWB masih menunggu',
+            body: id
+              ? awb
+                ? `ID shipment: ${id}. Status ${status ?? 'awb_assigned'} dengan AWB ${awb}. Kamu akan diarahkan ke Dashboard...`
+                : `ID shipment: ${id}. Status ${status ?? 'provider_submitted'}. KiriminAja menerima booking, tetapi AWB belum tersedia. Tunggu webhook/polling, lalu cek Dashboard.`
+              : 'Berhasil, mengarahkan ke dashboard...',
         });
       }
     } finally {
@@ -373,7 +477,7 @@ export default function ShipmentCreateWizardView() {
   }
 
   function next() {
-    if (step === 1 && !step1Valid) { setBanner({ tone: 'warning', title: 'Lengkapi Step 1', body: 'Origin & Destination keduanya harus diisi ke level Subdistrict. Nama, telepon, alamat wajib.' }); return; }
+      if (step === 1 && !step1Valid) { setBanner({ tone: 'warning', title: 'Lengkapi Step 1', body: 'Origin & Destination harus punya Subdistrict, Kecamatan Area ID, zipcode, latitude, longitude, nama, telepon, dan alamat.' }); return; }
     if (step === 2 && !step2Valid) { setBanner({ tone: 'warning', title: 'Lengkapi Step 2', body: 'Minimal 1 package (weight >= 10g), 1 item, declared total > 0. Max 20 packages / 50 items.' }); return; }
     if (step === 3 && !step3Valid) { setBanner({ tone: 'warning', title: 'Pilih 1 rate quote', body: 'Klik "Pilih" di kolom Action salah satu row rate result table.' }); return; }
     if (step === 4 && !step4Valid) { setBanner({ tone: 'warning', title: 'Pilih jadwal pickup', body: 'Pilih salah satu window pickup (tanggal + waktu) yang available.' }); return; }
@@ -459,7 +563,25 @@ export default function ShipmentCreateWizardView() {
 
         {/* Step 1 */}
         {isStep(1) && (
-          <Section kicker="Step 1 of 5 · Sender and Recipient" title="Enter Address Details" subtitle="All fields required. Subdistrict uses the 4-level cascading drill-down (Province → City → District → Subdistrict).">
+            <Section kicker="Step 1 of 5 · Sender and Recipient" title="Enter Address Details" subtitle="Backend create requires Kecamatan Area ID + zipcode + latitude + longitude for both sender and recipient; kelurahan (subdistrict) is optional. District id auto-seeds from the selected area and stays editable.">
+            {!step1Valid && (
+              <div className={'rounded-2xl border p-4 ' + STYLES.bannerWarning}>
+                <p className="font-semibold text-sm">Step 1 belum lengkap</p>
+                <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
+                  <p>
+                    <span className="font-semibold">Sender:</span>{' '}
+                    {senderMissing.length > 0 ? senderMissing.join(', ') : 'ok'}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Receiver:</span>{' '}
+                    {receiverMissing.length > 0 ? receiverMissing.join(', ') : 'ok'}
+                  </p>
+                </div>
+                <p className="mt-2 text-xs opacity-90">
+                  Memilih kelurahan sekarang hanya auto-fill data yang benar-benar ada di coverage cache. Kalau zipcode atau lat/lng masih kosong, kamu tetap bisa isi manual sambil menunggu cache enrichment lengkap.
+                </p>
+              </div>
+            )}
             <div className="grid gap-6 lg:grid-cols-2">
               {[
                 { who: 'Sender (Origin)', tone: 'info' as const, color: 'blue', data: sender, setData: setSender },
@@ -487,18 +609,69 @@ export default function ShipmentCreateWizardView() {
                       <input className={STYLES.input} placeholder="email@example.com" value={side.data.contact_email ?? ''} onChange={(e) => side.setData({ ...side.data, contact_email: e.target.value })} />
                     </div>
                     <div className="md:col-span-2 md:row-start-4">
-                      <label className={STYLES.label}>Subdistrict (Kecamatan / Kelurahan) <span className="text-red-500">*</span></label>
+                      <label className={STYLES.label}>Kecamatan (Kelurahan opsional) <span className="text-red-500">*</span></label>
                       <SubdistrictCoverageLookup
-                        level="subdistrict"
+                        level="district"
+                        env={isSandbox ? 'sandbox' : 'production'}
                         selectedIds={side.data.subdistrict
-                          ? {
-                            subdistrict: Number(side.data.subdistrict.id) || null,
-                          }
+                          ? (side.data.subdistrict.level === 'district'
+                            ? { district: Number(side.data.subdistrict.id) || null }
+                            : { subdistrict: Number(side.data.subdistrict.id) || null })
                           : undefined}
-                        onSelect={(area) => side.setData({ ...side.data, subdistrict: area })}
+                          onSelect={(area) => side.setData({
+                            ...side.data,
+                            subdistrict: area,
+                            district_area_id: String(area.level === 'district' ? area.id : (area.parent_id ?? '')),
+                            zipcode: String(area.postal_code ?? ''),
+                            latitude: area.latitude != null ? String(area.latitude) : '',
+                            longitude: area.longitude != null ? String(area.longitude) : '',
+                          })}
                       />
                     </div>
-                    <div className="md:col-span-2 md:row-start-5">
+                      <div className="md:col-span-2 md:row-start-5 grid gap-3 md:grid-cols-2">
+                        <div>
+                          <label className={STYLES.label}>Kecamatan Area ID <span className="text-red-500">*</span></label>
+                          <input
+                            type="number"
+                            className={STYLES.input}
+                            placeholder="Contoh: 123456"
+                            value={side.data.district_area_id}
+                            onChange={(e) => side.setData({ ...side.data, district_area_id: e.target.value.replace(/[^\d]/g, '') })}
+                          />
+                        </div>
+                        <div>
+                          <label className={STYLES.label}>Zipcode <span className="text-red-500">*</span></label>
+                          <input
+                            className={STYLES.input}
+                            placeholder="Kode pos"
+                            value={side.data.zipcode}
+                            onChange={(e) => side.setData({ ...side.data, zipcode: e.target.value.replace(/[^\d]/g, '') })}
+                          />
+                        </div>
+                        <div>
+                          <label className={STYLES.label}>Latitude <span className="text-red-500">*</span></label>
+                          <input
+                            type="number"
+                            step="any"
+                            className={STYLES.input}
+                            placeholder="-6.200000"
+                            value={side.data.latitude}
+                            onChange={(e) => side.setData({ ...side.data, latitude: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className={STYLES.label}>Longitude <span className="text-red-500">*</span></label>
+                          <input
+                            type="number"
+                            step="any"
+                            className={STYLES.input}
+                            placeholder="106.816666"
+                            value={side.data.longitude}
+                            onChange={(e) => side.setData({ ...side.data, longitude: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div className="md:col-span-2 md:row-start-6">
                       <label className={STYLES.label}>Street Address <span className="text-red-500">*</span></label>
                       <textarea rows={3} className={STYLES.input} placeholder="Full address (RT/RW, building, unit if any)..." value={side.data.address_line} onChange={(e) => side.setData({ ...side.data, address_line: e.target.value })} />
                     </div>
@@ -511,7 +684,7 @@ export default function ShipmentCreateWizardView() {
               <div />
               <div className="flex gap-2">
                 <button className={STYLES.buttonGhost} disabled onClick={back}><ArrowLeft size={14} className="mr-2 inline align-text-top" />Back (disabled, step 1)</button>
-                <button className={STYLES.buttonPrimary} disabled={!step1Valid} onClick={next}>
+                <button className={STYLES.buttonPrimary} onClick={next}>
                   Continue to Packages <ArrowRight size={14} className="ml-2 inline align-text-top" />
                 </button>
               </div>
@@ -522,6 +695,13 @@ export default function ShipmentCreateWizardView() {
         {/* Step 2 */}
         {isStep(2) && (
           <Section kicker="Step 2 of 5 · Packages & Items" title={`Packages (${packages.length} / 20) · Items (${totalItems} / 50)`} subtitle="Per-package actual/volumetric/billed; per-item declared value auto sum = declared_total_value_idr; fragile flag affects insurance minimum fee. Nilai final dihitung server di shipment_create_rpc (preview disini hanya estimasi client).">
+            {!step2Valid && (
+              <div className={'mb-5 rounded-2xl border p-4 ' + STYLES.bannerWarning}>
+                <p className="font-semibold text-sm">Step 2 belum lengkap</p>
+                <p className="mt-2 text-xs opacity-90">{step2Missing.join(', ')}</p>
+                <p className="mt-2 text-xs opacity-90">Weight di sini pakai gram. Jadi <code>1000</code> = 1 kg, sedangkan <code>1</code> = 1 gram.</p>
+              </div>
+            )}
             <div className="grid gap-3 md:grid-cols-3 mb-5">
               <div className={'p-4 rounded-2xl border ' + STYLES.bannerInfo}>
                 <Badge tone="info" label="Total Actual Weight" />
@@ -617,7 +797,7 @@ export default function ShipmentCreateWizardView() {
               <button className={STYLES.buttonSecondary} disabled={packages.length >= 20} onClick={addPackage}>+ Add Package</button>
               <div className="flex gap-2">
                 <button className={STYLES.buttonGhost} onClick={back}><ArrowLeft size={14} className="mr-2 inline align-text-top" />Back</button>
-                <button className={STYLES.buttonPrimary} disabled={!step2Valid} onClick={next}>Continue to Rate Quotes <ArrowRight size={14} className="ml-2 inline align-text-top" /></button>
+                <button className={STYLES.buttonPrimary} onClick={next}>Continue to Rate Quotes <ArrowRight size={14} className="ml-2 inline align-text-top" /></button>
               </div>
             </div>
           </Section>
@@ -820,6 +1000,12 @@ export default function ShipmentCreateWizardView() {
                   <p className="mt-0.5 text-xs text-gray-500">📱 {card.block.contact_phone || '—'}{card.block.contact_email ? ` · ✉ ${card.block.contact_email}` : ''}</p>
                   <p className="mt-2 text-sm text-gray-700 leading-relaxed">{card.block.address_line || '(Alamat empty)'}</p>
                   <p className="mt-2 text-xs text-gray-500">Subdistrict ID: {card.block.subdistrict?.id ?? '(belum dipilih)'}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Kecamatan Area ID: {card.block.district_area_id || '(belum diisi)'} · Zipcode: {card.block.zipcode || '(belum diisi)'}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Lat/Lng: {card.block.latitude || '(lat?)'} / {card.block.longitude || '(lng?)'}
+                    </p>
                 </div>
               ))}
             </div>
@@ -851,6 +1037,27 @@ export default function ShipmentCreateWizardView() {
                 </p>
               </div>
             </div>
+
+              <div className="mb-6 grid gap-4 md:grid-cols-2">
+                <div className={'rounded-2xl border p-5 ' + STYLES.bannerInfo}>
+                  <Badge tone={isSandbox ? 'warning' : 'neutral'} label={isSandbox ? 'SANDBOX' : 'PRODUCTION'} />
+                  <p className="mt-2 text-sm text-gray-700">Credential override: <span className="font-mono">{selectedCredentialId ?? '(default by env)'}</span></p>
+                  <label className="mt-3 inline-flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={isSandbox} onChange={(e) => setIsSandbox(e.target.checked)} />
+                    <span className="text-sm text-gray-700">Gunakan credential sandbox</span>
+                  </label>
+                </div>
+                <div className={'rounded-2xl border p-5 ' + STYLES.bannerWarning}>
+                  <Badge tone="warning" label="Provider Booking" />
+                  <p className="mt-2 text-sm text-gray-700">
+                    Submit sekarang akan membuat draft lokal lalu langsung booking ke KiriminAja. Hasil sukses bisa berupa
+                    <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5">awb_assigned</code>
+                    atau
+                    <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5">provider_submitted</code>
+                    jika AWB masih menunggu webhook/polling.
+                  </p>
+                </div>
+              </div>
 
             <div className="rounded-2xl border-2 border-gray-200 bg-white p-6 space-y-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-600">Payment Method</p>

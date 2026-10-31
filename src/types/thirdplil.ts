@@ -17,21 +17,19 @@ export type CourierServiceTier = 'economy' | 'regular' | 'express' | 'same_day' 
 
 export type ShipmentStatus =
   | 'draft'
-  | 'quoted'
-  | 'awaiting_payment'
-  | 'paid'
-  | 'payment_failed'
+  | 'provider_submitted'
+  | 'awb_assigned'
+  | 'pickup_requested'
   | 'pickup_scheduled'
-  | 'pickup_driver_assigned'
-  | 'pickup_enroute'
-  | 'pickup_completed'
-  | 'received_at_origin'
+  | 'courier_picked_up'
   | 'in_transit'
-  | 'received_at_destination'
   | 'out_for_delivery'
+  | 'attempt_failed'
   | 'delivered'
+  | 'return_in_progress'
   | 'returned'
   | 'problem_pending'
+  | 'problem_resolved'
   | 'canceled'
   | 'lost'
   | 'damaged';
@@ -94,6 +92,10 @@ export interface ThirdPLILCoverageArea {
   code: string;
   name: string;
   full_path?: string | null;
+  postal_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface CourierServiceCache {
@@ -123,10 +125,19 @@ export interface SubscriberCredential {
   is_sandbox: boolean;
   is_default: boolean;
   account_label: string;
+  /** KA `request_pickup` order_id prefix registered on the KA account (Dashboard > Integrasi). */
+  order_id_prefix?: string | null;
   api_user?: string | null;
   api_url_base?: string | null;
   credit_balance_idr?: string | null;
   credit_updated_at?: string | null;
+  callback_url?: string | null;
+  ka_callback_registered_at?: string | null;
+  ka_callback_register_ok?: boolean | null;
+  ka_callback_register_message?: string | null;
+  /** True when an encrypted KA credit PIN is stored for this credential (value itself is never returned). */
+  has_ka_credit_pin?: boolean | null;
+  ka_credit_pin_set_at?: string | null;
   webhook_shared_secret_hash?: string | null;
   last_test_conn_at?: string | null;
   last_test_conn_ok?: boolean | null;
@@ -148,6 +159,8 @@ export interface RateDimension {
 export interface RateQuote {
   provider_slug: ProviderSlug;
   provider_credential_id: number;
+  credential_id?: number;
+  is_sandbox?: boolean;
   courier_code?: string | null;         // 'jne', 'jnt', 'gosend', 'sicepat' — the 3PL identifier
   courier_name?: string | null;         // 'JNE', 'J&T', 'GoSend' — 3PL display name
   courier_service_code: string;         // 'REG', 'YES', 'INSTANT' — service tier within courier
@@ -202,11 +215,14 @@ export interface PackageWithItems {
 }
 
 export interface ShipmentHeader {
-  id: number;
+  shipment_id: number;
+  id?: number;
   subscriber_id: number;
-  provider_credential_id: number;
-  provider_slug: ProviderSlug;
-  is_sandbox: boolean;
+  credential_id: number;
+  provider_credential_id?: number;
+  provider_slug?: ProviderSlug;
+  provider_id?: number;
+  is_sandbox?: boolean;
   transaction_id: string;
   status: ShipmentStatus;
   courier_service_code?: string | null;
@@ -214,24 +230,39 @@ export interface ShipmentHeader {
   courier_code?: string | null;         // 3PL identifier ('jne', 'jnt', etc.)
   courier_name?: string | null;         // 3PL display name ('JNE', 'J&T', etc.)
   provider_order_id?: string | null;    // KA internal order_id (for tracking/cancel)
+  partner_order_ids?: string[] | null;
   awb_no?: string | null;
   awb_label_storage?: string | null;
-  origin_subdistrict_id: number;
-  destination_subdistrict_id: number;
-  origin_address_line: string;
-  origin_contact_name: string;
-  origin_contact_phone: string;
-  origin_contact_email?: string | null;
-  destination_address_line: string;
-  destination_contact_name: string;
-  destination_contact_phone: string;
-  destination_contact_email?: string | null;
+  sender_subdistrict_id: number;
+  sender_kecamatan_area_id?: number | null;
+  sender_zipcode?: string | null;
+  sender_latitude?: number | null;
+  sender_longitude?: number | null;
+  recipient_subdistrict_id: number;
+  recipient_kecamatan_area_id?: number | null;
+  recipient_zipcode?: string | null;
+  recipient_latitude?: number | null;
+  recipient_longitude?: number | null;
+  sender_address: string;
+  sender_contact_name?: string | null;
+  sender_name?: string | null;
+  sender_contact_phone?: string | null;
+  sender_phone?: string | null;
+  sender_contact_email?: string | null;
+  recipient_address: string;
+  recipient_contact_name?: string | null;
+  recipient_name?: string | null;
+  recipient_contact_phone?: string | null;
+  recipient_phone?: string | null;
+  recipient_contact_email?: string | null;
   payment_method?: 'ka_credit' | 'postpaid' | 'cod' | 'shipper_prepaid';
   ka_pin_was_used?: boolean;
   total_packages: number;
   total_actual_weight_g: number;
   total_billed_weight_g: number;
-  grand_total_fee_idr: string;
+  grand_total_idr?: string | null;
+  grand_total_fee_idr?: string | null;
+  base_shipping_fee_idr?: string | null;
   cod_amount_idr?: string | null;
   insurance_fee_idr?: string | null;
   is_insurance_enabled?: boolean;
@@ -241,9 +272,21 @@ export interface ShipmentHeader {
   pickup_start_time?: string | null;
   pickup_end_time?: string | null;
   pickup_driver_note?: string | null;
+  provider_data?: unknown;
   created_at?: string | null;
   updated_at?: string | null;
   delivered_at?: string | null;
+  // Compatibility aliases for older screens still using origin_/destination_ names.
+  origin_subdistrict_id?: number;
+  destination_subdistrict_id?: number;
+  origin_address_line?: string;
+  origin_contact_name?: string;
+  origin_contact_phone?: string;
+  origin_contact_email?: string | null;
+  destination_address_line?: string;
+  destination_contact_name?: string;
+  destination_contact_phone?: string;
+  destination_contact_email?: string | null;
 }
 
 export interface ShipmentDetail extends ShipmentHeader {
@@ -255,19 +298,30 @@ export interface CreateShipmentRequest {
   provider_slug?: ProviderSlug;
   is_sandbox?: boolean;
   transaction_id?: string | null;
+  external_ref?: string | null;
+  external_order_ref?: string | null;
   origin_subdistrict_id: number;
+  origin_kecamatan_area_id?: number | null;
   origin_address_line: string;
   origin_contact_name: string;
   origin_contact_phone: string;
   origin_contact_email?: string | null;
+  origin_zipcode?: string | null;
+  origin_latitude?: number | null;
+  origin_longitude?: number | null;
   destination_subdistrict_id: number;
+  destination_kecamatan_area_id?: number | null;
   destination_address_line: string;
   destination_contact_name: string;
   destination_contact_phone: string;
   destination_contact_email?: string | null;
+  destination_zipcode?: string | null;
+  destination_latitude?: number | null;
+  destination_longitude?: number | null;
   selected_courier_service_code: string;
   payment_method?: ShipmentHeader['payment_method'];
   ka_credit_pin?: string | null;
+  base_shipping_fee_idr?: string | null;
   cod_amount_idr?: string | null;
   declared_value_total_idr?: string | null;
   is_insurance_enabled?: boolean;

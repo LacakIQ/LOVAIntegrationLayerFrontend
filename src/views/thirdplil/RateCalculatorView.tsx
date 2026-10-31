@@ -24,8 +24,11 @@ export default function RateCalculatorView() {
   const [fetching, setFetching] = useState(false);
   const [quotes, setQuotes] = useState<RateQuote[]>([]);
 
+  // Kecamatan (district) is a valid final level — kelurahan is optional. The backend
+  // resolves either level to the provider kecamatan id, so both are accepted here.
+  const isFinalLevel = (a: ThirdPLILCoverageArea | null) => a?.level === 'district' || a?.level === 'subdistrict';
   const canFetch = useMemo(
-    () => !!origin && !!destination && (origin?.level === 'subdistrict') && (destination?.level === 'subdistrict') && weightKg >= 0.01,
+    () => !!origin && !!destination && isFinalLevel(origin) && isFinalLevel(destination) && weightKg >= 0.01,
     [origin, destination, weightKg]
   );
 
@@ -78,6 +81,8 @@ export default function RateCalculatorView() {
     const params = new URLSearchParams({
       origin_subdistrict_id: String(origin?.id ?? ''),
       destination_subdistrict_id: String(destination?.id ?? ''),
+      origin_level: origin?.level ?? '',
+      destination_level: destination?.level ?? '',
       origin_name: origin?.name ?? '',
       destination_name: destination?.name ?? '',
       weight_kg: String(weightKg),
@@ -85,13 +90,16 @@ export default function RateCalculatorView() {
       width_cm: String(widthCm ?? ''),
       height_cm: String(heightCm ?? ''),
       declared_value_idr: String(Math.round(declaredValueJt * 1_000_000)),
+      declared_total_value_idr: String(Math.round(declaredValueJt * 1_000_000)),
       cod_amount_idr: useCod ? String(Math.round(codAmountJt * 1_000_000)) : '',
       is_insurance_enabled: useInsurance ? '1' : '0',
+      insurance_enabled: useInsurance ? '1' : '0',
       courier_service_code: q.courier_service_code,
       courier_service_name: q.courier_service_name,
       base_fee_idr: q.base_fee_idr,
       grand_total_idr: q.grand_total_idr,
-      credential_id: String(q.provider_credential_id ?? ''),
+      credential_id: String(q.provider_credential_id ?? q.credential_id ?? ''),
+      is_sandbox: q.is_sandbox ? '1' : '0',
     });
     navigate(`${getPathForView('kiriminaja-shipments-create')}?${params.toString()}`);
   };
@@ -159,7 +167,7 @@ export default function RateCalculatorView() {
             <div className="lg:col-span-2 space-y-4">
               <div className="rounded-2xl border border-gray-200 p-4 space-y-5">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold flex items-center gap-2 text-xs uppercase tracking-wider text-blue-700">📍 Origin (Pengirim) — Kelurahan</p>
+                  <p className="font-semibold flex items-center gap-2 text-xs uppercase tracking-wider text-blue-700">📍 Origin (Pengirim) — Kecamatan/Kelurahan</p>
                   {origin && <Badge tone="info" label={(origin.name ?? '') + (origin.id ? ` #${origin.id}` : '')} />}
                 </div>
                 <SubdistrictCoverageLookup
@@ -171,7 +179,7 @@ export default function RateCalculatorView() {
               </div>
               <div className="rounded-2xl border border-gray-200 p-4 space-y-5">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold flex items-center gap-2 text-xs uppercase tracking-wider text-green-700">🎯 Destination (Penerima) — Kelurahan</p>
+                  <p className="font-semibold flex items-center gap-2 text-xs uppercase tracking-wider text-green-700">🎯 Destination (Penerima) — Kecamatan/Kelurahan</p>
                   {destination && <Badge tone="success" label={(destination.name ?? '') + (destination.id ? ` #${destination.id}` : '')} />}
                 </div>
                 <SubdistrictCoverageLookup
