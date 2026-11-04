@@ -9,6 +9,8 @@ export interface ShipmentDetailDrawerProps {
   open: boolean;
   shipmentId: bigint | number | null;
   onClose: () => void;
+  /** When provided, renders a "Cancel Shipment" action in the header (delegates the confirm + call to the parent). */
+  onRequestCancel?: (id: number) => void;
 }
 
 interface ShipmentStatusHistoryRow {
@@ -73,14 +75,13 @@ function formatTsLocal(iso?: string | null): string {
 
 const FALLBACK_PACKAGES: PackageWithItems[] = [];
 
-export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: ShipmentDetailDrawerProps) {
+export default function ShipmentDetailDrawer({ open, shipmentId, onClose, onRequestCancel }: ShipmentDetailDrawerProps) {
   const [tab, setTab] = useState<'summary' | 'packages' | 'pickup' | 'timeline'>('summary');
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [shipment, setShipment] = useState<ShipmentDetail | null>(null);
   const [history, setHistory] = useState<ShipmentStatusHistoryRow[]>([]);
   const [banner, setBanner] = useState<BannerState>(null);
-  const [lastFetchKey, setLastFetchKey] = useState<string>('');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -93,10 +94,6 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
       setBanner({ tone: 'warning', title: 'Shipment ID tidak tersedia', body: 'Drawer dibuka tanpa shipment_id yang valid.' });
       return;
     }
-    const key = `${String(shipmentId)}::${open ? '1' : '0'}`;
-    if (key === lastFetchKey) return;
-    setLastFetchKey(key);
-
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -126,7 +123,7 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
     })();
 
     return () => { cancelled = true; };
-  }, [mounted, open, shipmentId, lastFetchKey]);
+    }, [mounted, open, shipmentId]);
 
   useEffect(() => {
     if (!open) {
@@ -188,6 +185,8 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
   const headerService = shipment?.courier_service_name ?? '(courier belum ditentukan)';
   const headerId = shipment?.shipment_id ?? (typeof shipmentId === 'bigint' ? Number(shipmentId) : (shipmentId ?? 0));
   const headerCreatedAt = shipment?.created_at;
+  const cancelBlocked = !!shipment && ['delivered', 'returned', 'lost', 'damaged', 'canceled'].includes(shipment.status);
+  const canCancel = !!onRequestCancel && !!shipment && !cancelBlocked;
 
   return (
     <div className="fixed inset-0 z-[1000] flex justify-end">
@@ -219,6 +218,17 @@ export default function ShipmentDetailDrawer({ open, shipmentId, onClose }: Ship
               <button disabled className={STYLES.buttonSecondary + ' opacity-50 cursor-not-allowed'}>
                 <Download size={14} className="mr-2 inline align-text-top" />
                 (AWB belum tersedia)
+              </button>
+            )}
+            {onRequestCancel && (
+              <button
+                onClick={() => onRequestCancel(Number(headerId))}
+                disabled={!canCancel}
+                title={canCancel ? 'Cancel shipment' : 'Shipment sudah terminal — tidak bisa di-cancel'}
+                className="!bg-red-50 hover:!bg-red-100 text-red-700 border border-red-200 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <XCircle size={14} className="mr-1 inline align-text-top" />
+                Cancel Shipment
               </button>
             )}
             <a href={shipment?.provider_slug === 'kiriminaja' ? (shipment?.is_sandbox ? 'https://tdev.kiriminaja.com/dashboard' : 'https://client.kiriminaja.com/dashboard') : '#'} target="_blank" rel="noopener noreferrer" className={STYLES.buttonGhost}>

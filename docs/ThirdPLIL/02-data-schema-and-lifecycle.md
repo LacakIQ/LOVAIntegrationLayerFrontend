@@ -3,7 +3,7 @@
 - **Status**: LIVE — ThirdPLIL migrations 0001–0010 applied. `thirdpl_il` schema active (migration 0009 moved all IL tables out of `public`).
 - **Source of truth**: This document was authored from live DB introspection of the local `supabase_db_InezWebstoreSupabase` instance (authoritative column names, types, nullability, defaults, constraints, enums, indexes).
 - **Audience**: Backend engineers and DBAs maintaining ThirdPLIL; integration engineers needing to know exactly which tables each endpoint mutates.
-- **Companions**: [01-api-workflows.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/01-api-workflows.md), [KiriminAja/02-data-model.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/02-data-model.md), [KiriminAja/04-webhook-spec.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/04-webhook-spec.md).
+- **Companions**: [KiriminAja/08-onboarding-and-openapi-workflows.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/08-onboarding-and-openapi-workflows.md) (current canonical API workflows + onboarding reference), [KiriminAja/02-data-model.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/02-data-model.md), [KiriminAja/04-webhook-spec.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/04-webhook-spec.md). Legacy reference: [01-api-workflows.md](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/01-api-workflows.md) (superseded).
 
 ---
 

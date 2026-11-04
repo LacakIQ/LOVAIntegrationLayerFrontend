@@ -70,6 +70,34 @@ When completing a feature, bug fix, or refactor:
 
 ## 📅 Chronological Global Index
 
+### 2026-11-04
+
+#### [ThirdPLIL KiriminAja Frontend (r033 — Consumer API Keys route rename + shipment creation-path filters)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r033--consumer-api-keys-route-rename--shipment-creation-path-filters)
+- **Changed**: the consumer API keys page moved to **`/consumer/api-keys`** (with a redirect from the old `/settings/kiriminAja/api-keys`) and dropped the `Logistics · KiriminAja` eyebrow, so the route/copy matches the page's provider-neutral purpose. The Shipments Dashboard now consumes derived shipment provenance metadata (`creation_source`, `creation_actor`, `creation_consumer_api_key_id`) and adds a dedicated **Creation Path** filter, a **Consumer API Key** filter, search coverage for source/actor, and a new Creation Path table column.
+- **Fixed**: BUG-KA-FE-30 (HIGH — the dashboard could not truthfully show/filter how a shipment was created, and the visible timeline `source` values were not reliable enough to distinguish Path A vs Path B for all rows). Older rows are intentionally labelled `Unknown / Legacy` instead of guessed. `npx tsc --noEmit` clean. Paired with backend r031.
+
+#### [ThirdPLIL KiriminAja Frontend (r032 — Webhook event log: full-detail drawer for events + DLQ rows)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r032--webhook-event-log-full-detail-drawer-for-inboundoutbound-events--dlq-rows)
+- **Changed**: `/admin/webhooks` gained a read-only **detail drawer** (`WebhookEventDetailDrawer`) plus a per-row **Details** action on both the Events and DLQ tabs. It renders the entire row already returned by `GET /admin-webhooks/events|dlq` (`select *`) — a scalar metadata grid (timestamps in WIB) and pretty-printed JSON blocks for `payload`/`parsed_body`/`raw_headers`/`raw_query_params`/`last_response_body` etc., each with copy-to-clipboard. No backend change and no new DB field.
+- **Fixed**: BUG-KA-FE-29 (MEDIUM — the log showed only a few columns, so inspecting a failed delivery's payload/headers/response required a direct DB query). `npx tsc --noEmit` clean.
+
+#### [ThirdPLIL KiriminAja Frontend (r031 — Shipment cancel: confirmation gate + detail-drawer action)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r031--shipment-cancel-confirmation-gate--detail-drawer-action)
+- **Changed**: the shared `DeleteConfirmationModal` gained three opt-in props — `confirmLabel`, `description` (`ReactNode`) and `zIndexClass` (raise the overlay above a drawer) — all defaulting to the previous behaviour so existing callers are untouched. The Shipments Dashboard row **Cancel** now opens that confirmation instead of firing `DELETE` immediately (`confirmCancelId` state), and the shipment **detail drawer** grew a header **Cancel Shipment** action via a new optional `onRequestCancel` prop, disabled on terminal statuses (`delivered`/`returned`/`lost`/`damaged`/`canceled`). Both entry points funnel into the single confirmation gate.
+- **Fixed**: BUG-KA-FE-28 (MEDIUM — cancel was immediate/unconfirmed and absent from the drawer). `npx tsc --noEmit` clean. (Also restored the missing `BUG-KA-FE-27` row in the module bug matrix for r028.)
+
+#### [ThirdPLIL KiriminAja Frontend (r030 — Two coverage admin pages + credit-default wizard)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r030--two-coverage-admin-pages--credit-default-wizard)
+- **Changed**: two new admin pages — `CoverageView` (`/admin/coverage`, `AppView` `'kiriminaja-coverage'`) browses the provider's cached coverage (province→city→district→subdistrict, reusing `SubdistrictCoverageLookup`) with a stats strip from the new `GET /stats` and a **Start Sync** button that enqueues via `POST /sync/runs` then jumps to the monitor; `CoverageSyncMonitorView` (`/admin/coverage/sync`, `AppView` `'kiriminaja-coverage-sync-monitor'`) polls `GET /sync/runs` every 5 s (auto-refresh toggle, paused while a row is expanded, **stopped once no run is active**) and renders an active-run card (progress bar `processed/total` cities, `current_step`, per-level `row_counts`, `pending_district_cities`, `attempt_count`, heartbeat) plus an expandable history table. Both views map to `thirdplil.webhook.view`. New types `CoverageSyncRun`/`CoverageStats`/`EnqueueCoverageSyncRunResponse` mirror the backend projections. The Create Wizard now defaults its payment method to **`ka_credit`** and makes the KA Credit PIN optional (blank → stored PIN server-side).
+- **Fixed**: (none for this rev — `npx tsc --noEmit` clean; T10 live poll/heartbeat + poll-stop verified 2026-11-04 against the monitor's data contract). Paired with backend r030.
+
+#### [ThirdPLIL KiriminAja Frontend (r028 — Path A must pick a credential in the UI; "Set Default" removed)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r028--path-a-must-pick-a-credential-in-the-ui-set-default-removed)
+- **Changed**: new reusable `CredentialSelector` (provider-agnostic; no default pre-selection, auto-picks only when exactly one credential matches; reports the resolved row via `onResolve`). Rate Calculator now gates `Fetch Rates` on a selected credential and forwards the **user-selected** credential onward; the Create Wizard shows a persistent selector (env derived from it, manual `is_sandbox` checkbox replaced by a badge) and threads the credential into steps 3/4/5; the Shipments Dashboard gained a `CredentialSelector` filter (server-side `credential_id` param) and a Credential column (grid now 10 cols). The **Set Default** action, its badge/column, the delete guard and `is_default` on `SubscriberCredential` are all removed. Paired with backend r028 (`thirdpl_il`).
+- **Fixed**: BUG-KA-FE-27 (HIGH — Path A had no way to choose which credential a rates/schedule/create call used, relying on a silent `is_default` fallback that nothing sets at creation). `npm run lint` (`tsc --noEmit`) clean.
+
+### 2026-11-03
+
+#### [ThirdPLIL KiriminAja Frontend (r027 — Consumer API Keys page creates and revokes Path-B keys pinned to one credential)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-03r027--consumer-api-keys-page-creates-and-revokes-path-b-keys-pinned-to-one-credential)
+- **Changed**: new `ApiKeysView` at `/settings/kiriminAja/api-keys` (`AppView` `'kiriminaja-consumer-api-keys'`, permission `thirdplil.credentials.edit`) — the ThirdPLIL twin of the PGIL API-keys page. It lists Path-B keys with their Route C **pin** (credential label + `#credential_id · provider`, env badge driven by `credential.is_sandbox`) and its Generate modal **forces** a credential selection (refuses to submit without one), then POSTs `{ label, credential_id }` to the new Path-A-only `thirdplil-admin-consumer-keys` Edge Function and shows the one-time `raw_key_once`; revoke calls `POST /:id/revoke`. New `ConsumerApiKey` type mirrors the Edge list projection.
+- **Fixed**: (none for this rev — built to the Route C §3.4b mint contract; `npx tsc --noEmit` clean.)
+
 ### 2026-10-31
 
 #### [ThirdPLIL KiriminAja Frontend (r022 — Credentials page now manages callback registration)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-31r022--credentials-page-now-manages-callback-registration-and-reflects-the-bearer-auth-webhook-redesign)
@@ -103,7 +131,7 @@ When completing a feature, bug fix, or refactor:
 #### [ThirdPLIL KiriminAja Frontend (r016 — NONE code, docs-only pair with backend r012: MitraAPI adapter reconciliation)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-10-21r016--frontend-none-this-rev-backend-doc-reconciliation-kiriminaja-adapter-audited-vs-official-mitraapi-spec)
 - **Frontend no write, backend-only rev**: Backend audited the KiriminAja adapter against the official `api-reference.json` + a live sandbox probe and found it targets a non-existent API shape (Bearer-only auth, no `/api/v2` base suffix, all 11 endpoint paths invented, envelope key `results`, no webhook event id, webhook unsigned). Full rewrite plan lives in `09-mitraapi-adapter-reconciliation.md`.
 - Backend also reconciled the umbrella docs `07-auth-tenancy-design.md` (new §0 Schema Map) and `08-onboarding-and-openapi-workflows.md`; repo naming updated `ThirdPLILFrontend` → `LOVAIntegrationLayerFrontend`.
-- Paired backend cross-ref: [kiriminaja-changelogs.md §r012](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L80-L106).
+- Paired backend cross-ref: [kiriminaja-changelogs.md §r012](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L426-L450).
 
 ### 2026-10-20
 
@@ -114,58 +142,58 @@ When completing a feature, bug fix, or refactor:
 
 ### 2026-10-12
 
-#### [ThirdPLIL KiriminAja Frontend (r014 — Credentials view: display webhook URL + wh_secret after credential creation)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)
+#### [ThirdPLIL KiriminAja Frontend (r014 — Credentials view: display webhook URL + wh_secret after credential creation)](KiriminAja/kiriminaja-frontend-changelogs.md#L432-L444)
 - **Changed**: `CredentialsKiriminAjaView.tsx` success banner now displays **both** `webhook_url` (full URL to paste into KA Dashboard → Settings → Webhooks) and `raw_key_once` (64-hex `wh_secret`), each with its own Copy button. Previously only `raw_key_once` was shown — user had no way to get the full webhook URL. Added `showWebhookUrlOnce` state; `submitNew` captures both fields from `POST /credentials` response.
 - **Fixed**: `raw_key_once` was mislabeled "secret key" — it's actually the webhook `wh_secret` (KA API key is encrypted at rest and never re-displayed).
-- Paired backend cross-ref: [kiriminaja-changelogs.md §r014](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L193-L232).
+- Paired backend cross-ref: [kiriminaja-changelogs.md §r014](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L663-L702).
 - Frontend `tsc --noEmit` exit 0 confirmed.
 
 ### 2026-10-08
 
-#### [ThirdPLIL KiriminAja Frontend (r013 — NONE code, docs-only pair with backend r013: scope correction saved-address-book rollback)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)
+#### [ThirdPLIL KiriminAja Frontend (r013 — NONE code, docs-only pair with backend r013: scope correction saved-address-book rollback)](KiriminAja/kiriminaja-frontend-changelogs.md#L448-L461)
 - **Frontend no write, backend-only rev**: User-approved SCOPE BOUNDARY correction. Paired backend rev r013 ROLLS BACK r012 Saved Address Book CRUD endpoints/schemas inside IL (that is Webstore/CRM domain — not integration layer). Kept correct in-scope items: GET /coverage tree hierarchical + CoverageAreaNode stable id. Reverted CreateShipmentRequest → strict 8 inline origin/destination fields required (no expand-by-reference use_saved_* — webstore expands from their OWN address book before POST). Frontend tsc --noEmit still 0.
-- Paired backend cross-ref link: [kiriminaja-changelogs.md §r013](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L193-L220).
+- Paired backend cross-ref link: [kiriminaja-changelogs.md §r013](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L706-L733).
 
-#### [ThirdPLIL KiriminAja Frontend (r012 — NONE code, docs-only pair with backend r012: coverage tree + saved address book)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)
+#### [ThirdPLIL KiriminAja Frontend (r012 — NONE code, docs-only pair with backend r012: coverage tree + saved address book)](KiriminAja/kiriminaja-frontend-changelogs.md#L465-L478)
 - **Frontend no write, backend-only rev**: Paired backend rev r012 extends OpenAPI yaml 2 new groups: GET /coverage/tree (4-level hierarchical provider-agnostic area nodes id=stable bigint FK area_id; code_provider external ids in metadata per provider slug) + Saved Address Book /consumers/{cid}/addresses CRUD + schema SavedAddress (subdistrict_id FK normalized + per-provider_snapshot jsonb + optional use_saved_*_address_id expand on POST /shipments). Frontend tsc --noEmit still 0.
-- Paired backend cross-ref link: [kiriminaja-changelogs.md §r012](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L193-L215).
+- Paired backend cross-ref link: [kiriminaja-changelogs.md §r012](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L737-L758).
 
-#### [ThirdPLIL KiriminAja Frontend (r011 — NONE code, docs-only pair with backend r011: ASCII drawing → Mermaid)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L262)
+#### [ThirdPLIL KiriminAja Frontend (r011 — NONE code, docs-only pair with backend r011: ASCII drawing → Mermaid)](KiriminAja/kiriminaja-frontend-changelogs.md#L482-L493)
 - **Frontend no write, backend-only rev**: Paired backend rev r011 fixes 08-onboarding §7 confusing ASCII 5-column pipe-art table drawing → replaces with Mermaid `sequenceDiagram` (GitHub/VSCode Preview renders natively). 5 participants / 8 steps / 4 failure alt blocks. TSC still 0 errors.
-- Paired backend cross-ref link: [kiriminaja-changelogs.md §r011](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L193-L211).
+- Paired backend cross-ref link: [kiriminaja-changelogs.md §r011](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L762-L779).
 
-#### [ThirdPLIL KiriminAja Frontend (r010 — NONE code, docs-only pair with backend r010 onboarding workflows)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)
-- **Frontend no write, backend-only rev**: Paired backend rev r010 delivers NEW document 08-onboarding-and-openapi-workflows.md 7-section start-to-end onboarding (IL ops admin onboarding + Webstore integration). Backend cross-ref link: [kiriminaja-changelogs.md §r010](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L193-L222). Frontend tsc --noEmit still 0.
+#### [ThirdPLIL KiriminAja Frontend (r010 — NONE code, docs-only pair with backend r010 onboarding workflows)](KiriminAja/kiriminaja-frontend-changelogs.md#L497-L509)
+- **Frontend no write, backend-only rev**: Paired backend rev r010 delivers NEW document 08-onboarding-and-openapi-workflows.md 7-section start-to-end onboarding (IL ops admin onboarding + Webstore integration). Backend cross-ref link: [kiriminaja-changelogs.md §r010](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L783-L810). Frontend tsc --noEmit still 0.
 
-#### [ThirdPLIL KiriminAja Frontend (r009 — NONE code, docs-only pair with backend r009 schema move)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L265)
+#### [ThirdPLIL KiriminAja Frontend (r009 — NONE code, docs-only pair with backend r009 schema move)](KiriminAja/kiriminaja-frontend-changelogs.md#L513-L526)
 - **Frontend no write, backend-only rev**: Paired backend rev r009 delivers SCHEMA boundary isolation: ALL 16 tables, 7 enums, 5 RPC funcs moved from `public` → new dedicated schema `thirdpl_il` (avoids webstore public schema pollution). Backend delivered 5 thin `public.<rpc_name>` SQL aliases → forward to real thirdpl_il implementations, zero TS changes. Authenticated/anon/service_role roles default search_path = `"$user", public, thirdpl_il` → `supabase.from('thirdplil_shipments')` still works.
-- Paired backend cross-ref: [kiriminaja-changelogs.md §r009](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L192-L234)
+- Paired backend cross-ref: [kiriminaja-changelogs.md §r009](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L814-L853)
 - No regressions expected (frontend tsc --noEmit already 0; no React/TypeScript touched).
 
-#### [ThirdPLIL KiriminAja Frontend (r008 — NONE code, docs-only pair with backend r008 auth handoff doc)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)
+#### [ThirdPLIL KiriminAja Frontend (r008 — NONE code, docs-only pair with backend r008 auth handoff doc)](KiriminAja/kiriminaja-frontend-changelogs.md#L530-L542)
 - **Frontend no write, docs-only rev**: Paired backend rev r008 delivers single canonical reference **07-auth-tenancy-design.md** (new doc #7 after 06-consumer-openapi.yaml): explains dual PathA+PathB inbound auth, GUC thirdplil.current_subscriber_id equivalence, RLS policies, outbound webhook ThirdPLIL-Signature HMAC-SHA256 signing, only-once 64-hex consumer secret banner, optional X-ThirdPLIL-Credential-Id/Idempotency-Key override headers, PIN Ephemeral Triple Discipline, test vectors, audit/rotation table. PRD §8 Future AI reading order re-ordered: 07-auth-tenancy-design.md now FIRST before 05-tenancy-design.
-- Paired backend cross-ref link: [kiriminaja-changelogs.md §r008](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L193-L208).
+- Paired backend cross-ref link: [kiriminaja-changelogs.md §r008](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#L857-L873).
 - No regressions: tsc --noEmit / npm run lint / VSCode GetDiagnostics all still 0 errors on frontend post r006 baseline (expected: docs-only no code touched).
 
-#### [ThirdPLIL KiriminAja Frontend (r007 — NONE code, docs-only pair with backend r007)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L264)
+#### [ThirdPLIL KiriminAja Frontend (r007 — NONE code, docs-only pair with backend r007)](KiriminAja/kiriminaja-frontend-changelogs.md#L546-L559)
 - **Frontend no write**: Paired backend rev 007 delivers: 1. OpenAPI 06 adds GET /schedules/pickup dual-auth endpoint docs; 2. DB migration 0008 creates pg_cron nightly 02:00 UTC coverage + weekly Mon courier-services cache refresh jobs; 3. PRD §7 Status Tracker synchronized real-world state.
 - No regressions: frontend tsc --noEmit exit 0 confirmed r006 close, unchanged.
 
-#### [ThirdPLIL KiriminAja Frontend (r006 — Wizard 5-step Live + Webhook Log 3-tab Live + Drawer Part 2)](KiriminAja/kiriminaja-frontend-changelogs.md#L251-L278)
+#### [ThirdPLIL KiriminAja Frontend (r006 — Wizard 5-step Live + Webhook Log 3-tab Live + Drawer Part 2)](KiriminAja/kiriminaja-frontend-changelogs.md#L563-L586)
 - **Changed**: ShipmentCreateWizard 5 steps now fully live: URL pre-fill hook (from Rate Calc select), Step 1 (Origin/Dest 2 SubdistrictLookup), Step 2 (Packages dynamic 20 max, items 50 max add/remove rows), Step 3 (inline Fetch Rates → RateTable compact select), Step 4 (schedules endpoint GET → radio grid pickup windows + cut off badge, fee tone Badge), Step 5 (Review 5-card summary + KA Credit PIN 6-digit password input ephemeral cleared finally unconditionally, onSubmit → POST /shipments → navigate Dashboard with #drawer-open-id hash). WebhookEventLog 3 sub-tabs: Inbound events ServerDataTable Replay → POST admin-webhooks/events/:id/replay; DLQ (5xx attempts 5/5) Replay; Consumer Registrations CRUD + auto 64-hex secret only-once banner + Test Ping signed HMAC. ShipmentDetailDrawer Part 2 full live-hydrate (samplePackages/sampleTimeline removed, useEffect(open) → GET shipments/:id combined `{shipment, history}` payload → state, history sort asc, Pickup driver_name/driver_phone hydrate from pickup_driver_assigned history row note_jsonb). Permissions map added 7 codes (schedule view, ka credit balance, coverage sync, wizard create, webhooks read/replay, consumers write).
 - **Fixed**: Type drift in ShipmentHeader — 5 optional `pickup_*` fields missing vs CreateShipmentRequest mirrored on both frontend/backend shared types files. Badge string label guard replaced ReactNode loader pill with inline span. Drawer close clears all state (shipment/history/banner) to prevent stale data on next open without refresh.
 
 ### 2026-10-07
 
-#### [ThirdPLIL KiriminAja Frontend (r005 — 4 Views Full Wired + Drawer/Real API)](KiriminAja/kiriminaja-frontend-changelogs.md#L216-L264)
+#### [ThirdPLIL KiriminAja Frontend (r005 — 4 Views Full Wired + Drawer/Real API)](KiriminAja/kiriminaja-frontend-changelogs.md#L359-L389)
 - **Changed**: Credentials list + Add Modal/Set Default/Test Connection/Delete guard (REAL API). Rate Calculator: 2 cascading lookups → Fetch Rates → real RateResultsTable → on-Select jump to Wizard pre-filled. Dashboard: list from real Edge + onRowClick → open ShipmentDetailDrawer (hydrates from API). Wizard Steps 1/2/3 live. Banner piped from callThirdPLILInternalUI result into state.
 - **Fixed**: r004 `thirdplilApi.ts` anon key env fallback expanded; `SubdistrictCoverageLookup` default selectedIds prop set (safely handles `undefined` parent).
 
-#### [ThirdPLIL KiriminAja Frontend (r004 — Shared Types + API Wrapper + 3 Shared Components Scaffold)](KiriminAja/kiriminaja-frontend-changelogs.md#L217-L244)
+#### [ThirdPLIL KiriminAja Frontend (r004 — Shared Types + API Wrapper + 3 Shared Components Scaffold)](KiriminAja/kiriminaja-frontend-changelogs.md#L590-L617)
 - **Changed**: `src/types/thirdplil.ts` (12 enums + 14 interfaces) + `src/utils/thirdplilApi.ts` typed generic `callThirdPLILInternalUI<T>` wrapper (10-row banner error map, 409 dedup as OK, PIN ephemeral exclude list, auto transaction_id header). 3 Shared Components scaffold stubs in new `components/thirdplil/` folder: SubdistrictCoverageLookup (4-level cascading), RateResultsTable (8-col quote grid), ShipmentDetailDrawer (4 SubTabs header/packages/pickup/timeline). Hook scaffold type exported.
 - **Fixed**: (none — scaffolding; real wiring + fetch tests deferred to r005).
 
-#### [ThirdPLIL KiriminAja Frontend (r003 — Phase 1 Wiring)](KiriminAja/kiriminaja-frontend-changelogs.md#L180-L213)
+#### [ThirdPLIL KiriminAja Frontend (r003 — Phase 1 Wiring)](KiriminAja/kiriminaja-frontend-changelogs.md#L322-L355)
 - **Changed**: Phase 1 code written — frontend routing/plumbing is live (5 views accessible by URL + nav). 5 AppView variants appended to src/types.ts, 5 routes registered in APP_ROUTES (settings/credentials → tools/rates → new thirdplil top-level Truck menu for Shipments Dashboard / Create / Webhooks Admin), App.tsx lazy imports + renderView switch 5 cases + navigation tree with permissions, permission-context.tsx VIEW_PERMISSIONS mapping (5 → 12 backend codes), 5 placeholder stub TSX views in new src/views/thirdplil/ folder.
 - **Fixed**: (none — wiring/plumbing phase; actual view widgets deferred to next rev).
 

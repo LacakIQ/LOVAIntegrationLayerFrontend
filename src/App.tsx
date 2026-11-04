@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useMemo, useState } from 'react';
 import {
+  Activity,
   Bell,
   Calculator,
   ChevronDown,
@@ -7,6 +8,7 @@ import {
   Home,
   KeyRound,
   LogOut,
+  MapPinned,
   Menu,
   Package,
   PlusCircle,
@@ -27,11 +29,14 @@ import { useAuth } from './useAuth';
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ThemeGuideView = lazy(() => import('./views/ThemeGuideView'));
 const CredentialsKiriminAjaView = lazy(() => import('./views/thirdplil/CredentialsKiriminAjaView'));
+const ThirdPlilApiKeysView = lazy(() => import('./views/thirdplil/ApiKeysView'));
 const RateCalculatorView = lazy(() => import('./views/thirdplil/RateCalculatorView'));
 const ShipmentsDashboardView = lazy(() => import('./views/thirdplil/ShipmentsDashboardView'));
 const ShipmentCreateWizardView = lazy(() => import('./views/thirdplil/ShipmentCreateWizardView'));
 const WebhookEventLogView = lazy(() => import('./views/thirdplil/WebhookEventLogView'));
 const CronMonitorView = lazy(() => import('./views/thirdplil/CronMonitorView'));
+const CoverageView = lazy(() => import('./views/thirdplil/CoverageView'));
+const CoverageSyncMonitorView = lazy(() => import('./views/thirdplil/CoverageSyncMonitorView'));
 // PGIL views
 const PgilTransactionsView = lazy(() => import('./views/pgil/TransactionsView'));
 const PgilCredentialsView = lazy(() => import('./views/pgil/CredentialsView'));
@@ -211,8 +216,10 @@ function AppShell({ onSignOut }: { onSignOut: () => Promise<void> }) {
       children: [
         { id: 'thirdplil-shipments-dashboard', name: 'Shipments Dashboard', icon: Package, view: 'kiriminaja-shipments-dashboard', permission: 'thirdplil.shipments.view' },
         { id: 'thirdplil-shipments-create', name: 'Create Shipment', icon: PlusCircle, view: 'kiriminaja-shipments-create', permission: 'thirdplil.shipments.create' },
-        { id: 'thirdplil-webhooks-admin', name: 'Webhook Admin', icon: Webhook, view: 'kiriminaja-webhooks-log', permission: 'thirdplil.webhook.view' },
+          { id: 'thirdplil-webhooks-admin', name: 'Webhook Logs', icon: Webhook, view: 'kiriminaja-webhooks-log', permission: 'thirdplil.webhook.view' },
         { id: 'thirdplil-cron-monitor', name: 'Cron Monitor', icon: Bell, view: 'kiriminaja-cron-monitor', permission: 'thirdplil.webhook.view' },
+        { id: 'thirdplil-coverage', name: 'Coverage Area', icon: MapPinned, view: 'kiriminaja-coverage', permission: 'thirdplil.webhook.view' },
+        { id: 'thirdplil-coverage-sync-monitor', name: 'Coverage Sync Monitor', icon: Activity, view: 'kiriminaja-coverage-sync-monitor', permission: 'thirdplil.webhook.view' },
       ],
     },
     {
@@ -226,6 +233,7 @@ function AppShell({ onSignOut }: { onSignOut: () => Promise<void> }) {
       children: [
         { id: 'settings-theme-guide', name: 'Theme Guide', view: 'settings-theme-guide' },
         { id: 'settings-kiriminaja-credentials', name: 'Credentials (Logistics)', view: 'kiriminaja-credentials', permission: 'thirdplil.credentials.view' },
+        { id: 'settings-kiriminaja-api-keys', name: 'Consumer API Keys', icon: KeyRound, view: 'kiriminaja-consumer-api-keys', permission: 'thirdplil.credentials.edit' },
       ],
     },
     {
@@ -283,11 +291,14 @@ function AppShell({ onSignOut }: { onSignOut: () => Promise<void> }) {
       case 'dashboard': return <DashboardView />;
       case 'settings-theme-guide': return <ThemeGuideView />;
       case 'kiriminaja-credentials': return <CredentialsKiriminAjaView />;
+      case 'kiriminaja-consumer-api-keys': return <ThirdPlilApiKeysView />;
       case 'kiriminaja-rate-calculator': return <RateCalculatorView />;
       case 'kiriminaja-shipments-dashboard': return <ShipmentsDashboardView />;
       case 'kiriminaja-shipments-create': return <ShipmentCreateWizardView />;
       case 'kiriminaja-webhooks-log': return <WebhookEventLogView />;
       case 'kiriminaja-cron-monitor': return <CronMonitorView />;
+      case 'kiriminaja-coverage': return <CoverageView />;
+      case 'kiriminaja-coverage-sync-monitor': return <CoverageSyncMonitorView />;
       case 'pgil-transactions': return <PgilTransactionsView />;
       case 'pgil-credentials': return <PgilCredentialsView />;
       case 'pgil-webhooks': return <PgilWebhooksView />;
@@ -352,7 +363,11 @@ function AppShell({ onSignOut }: { onSignOut: () => Promise<void> }) {
                         if (!child.view) return null;
                         const ChildIcon = child.icon;
                         return (
-                          <NavLink key={child.id} to={getPathForView(child.view)}>
+                          <NavLink
+                            key={child.id}
+                            to={getPathForView(child.view)}
+                            className="block"
+                          >
                             {({ isActive: routeActive }) => (
                               <span
                                 className={
@@ -435,6 +450,7 @@ function AppShell({ onSignOut }: { onSignOut: () => Promise<void> }) {
             )}
             <Routes>
               <Route path="/" element={<DefaultRouteRedirect />} />
+              <Route path="/settings/kiriminAja/api-keys" element={<Navigate to={getPathForView('kiriminaja-consumer-api-keys')} replace />} />
               {APP_ROUTES.map((route) => (
                 <Route key={route.view} path={route.path}
                   element={

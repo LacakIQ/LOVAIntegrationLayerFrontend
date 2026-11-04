@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Clock, KeyRound, Loader2, Plus as PlusIcon, RefreshCw, Save, ServerCrash as ServerCrashIcon, Webhook as WebhookIcon, X } from 'lucide-react';
+import { Check, Clock, Eye, KeyRound, Loader2, Plus as PlusIcon, RefreshCw, Save, ServerCrash as ServerCrashIcon, Webhook as WebhookIcon, X } from 'lucide-react';
 import { STYLES, Section, Badge } from '../../components/ui/STYLES.tsx';
 import SubTabs from '../../components/SubTabs.tsx';
 import type {
@@ -7,9 +7,9 @@ import type {
   AdminWebhookEvent,
   BannerState,
   ConsumerWebhookRegistration,
-  PagedListResponse,
 } from '../../types/thirdplil.ts';
 import { callThirdPLILInternalUI } from '../../utils/thirdplilApi.ts';
+import WebhookEventDetailDrawer from '../../components/thirdplil/WebhookEventDetailDrawer.tsx';
 
 type TabId = 'inbound' | 'dlq' | 'consumers';
 
@@ -42,6 +42,9 @@ export default function WebhookEventLogView() {
   const [inTotalRows, setInTotalRows] = useState(0);
   const [inTotalPages, setInTotalPages] = useState(1);
   const [inReplayId, setInReplayId] = useState<number | null>(null);
+
+  // Detail drawer (shared by Events + DLQ tabs)
+  const [detailRow, setDetailRow] = useState<Record<string, unknown> | null>(null);
 
   // DLQ
   const [dlqPage, setDlqPage] = useState(1);
@@ -80,16 +83,11 @@ export default function WebhookEventLogView() {
 
   async function loadConsumers() {
     setConsumersLoading(true);
-    const res = await callThirdPLILInternalUI<PagedListResponse<ConsumerWebhookRegistration> | ConsumerWebhookRegistration[]>('thirdplil-admin-webhooks/consumers', { method: 'GET', isMutation: false, timeoutMs: 20000 });
+      const res = await callThirdPLILInternalUI<ConsumerWebhookRegistration[]>('thirdplil-admin-webhooks/consumers', { method: 'GET', isMutation: false, timeoutMs: 20000 });
     setConsumersLoading(false);
     if (!res.ok) { setBanner(res.banner); return; }
-    const raw = res.data;
-    const list: ConsumerWebhookRegistration[] = Array.isArray(raw)
-      ? (raw as ConsumerWebhookRegistration[])
-      : ((raw as PagedListResponse<ConsumerWebhookRegistration>)?.rows ?? []);
-    setConsumers(list ?? []);
-    const plr = raw as PagedListResponse<ConsumerWebhookRegistration> | undefined;
-    if (plr?.banner || res.banner) setBanner(plr?.banner ?? res.banner ?? null);
+      setConsumers(Array.isArray(res.data) ? res.data : []);
+      if (res.banner) setBanner(res.banner);
   }
 
   async function loadInbound() {
@@ -97,26 +95,28 @@ export default function WebhookEventLogView() {
     const q: Record<string, string> = { page: String(inPage), per_page: String(inPerPage) };
     if (inDir !== 'all') q.direction = inDir;
     if (inShipmentId.trim()) q.shipment_id = inShipmentId.trim();
-    const res = await callThirdPLILInternalUI<PagedListResponse<AdminWebhookEvent>>('thirdplil-admin-webhooks/events', { method: 'GET', isMutation: false, timeoutMs: 20000, query: q });
+      const res = await callThirdPLILInternalUI<AdminWebhookEvent[]>('thirdplil-admin-webhooks/events', { method: 'GET', isMutation: false, timeoutMs: 20000, query: q });
     setInLoading(false);
     if (!res.ok) { setBanner(res.banner); return; }
-    const d = res.data as PagedListResponse<AdminWebhookEvent>;
-    setInRows(d?.rows ?? []);
-    setInTotalRows(d?.total_rows ?? 0);
-    setInTotalPages(d?.total_pages ?? 1);
-    if (d?.banner || res.banner) setBanner(d?.banner ?? res.banner ?? null);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const totalRows = res.meta?.total ?? rows.length;
+      setInRows(rows);
+      setInTotalRows(totalRows);
+      setInTotalPages(Math.max(1, Math.ceil(totalRows / inPerPage)));
+      if (res.banner) setBanner(res.banner);
   }
 
   async function loadDlq() {
     setDlqLoading(true);
-    const res = await callThirdPLILInternalUI<PagedListResponse<AdminWebhookDLQEntry>>('thirdplil-admin-webhooks/dlq', { method: 'GET', isMutation: false, timeoutMs: 20000, query: { page: String(dlqPage), per_page: String(dlqPerPage) } });
+      const res = await callThirdPLILInternalUI<AdminWebhookDLQEntry[]>('thirdplil-admin-webhooks/dlq', { method: 'GET', isMutation: false, timeoutMs: 20000, query: { page: String(dlqPage), per_page: String(dlqPerPage) } });
     setDlqLoading(false);
     if (!res.ok) { setBanner(res.banner); return; }
-    const d = res.data as PagedListResponse<AdminWebhookDLQEntry>;
-    setDlqRows(d?.rows ?? []);
-    setDlqTotalRows(d?.total_rows ?? 0);
-    setDlqTotalPages(d?.total_pages ?? 1);
-    if (d?.banner || res.banner) setBanner(d?.banner ?? res.banner ?? null);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const totalRows = res.meta?.total ?? rows.length;
+      setDlqRows(rows);
+      setDlqTotalRows(totalRows);
+      setDlqTotalPages(Math.max(1, Math.ceil(totalRows / dlqPerPage)));
+      if (res.banner) setBanner(res.banner);
   }
 
   async function replayEvent(evId: number) {
@@ -281,9 +281,14 @@ export default function WebhookEventLogView() {
                       </td>
                       <td className="px-4 py-3 text-xs font-mono text-gray-500">{e.received_at ?? e.created_at ?? '—'}</td>
                       <td className="px-4 py-3">
-                        <button disabled={inReplayId === e.id} onClick={() => replayEvent(e.id)} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs'}>
-                          {inReplayId === e.id ? <><Loader2 size={13} className="inline align-text-top animate-spin mr-1" />Replay…</> : '↺ Replay enqueue'}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => setDetailRow(e as unknown as Record<string, unknown>)} className={STYLES.buttonGhost + ' !py-1.5 !text-xs'}>
+                            <Eye size={13} className="inline align-text-top mr-1" />Details
+                          </button>
+                          <button disabled={inReplayId === e.id} onClick={() => replayEvent(e.id)} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs'}>
+                            {inReplayId === e.id ? <><Loader2 size={13} className="inline align-text-top animate-spin mr-1" />Replay…</> : '↺ Replay enqueue'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -338,9 +343,14 @@ export default function WebhookEventLogView() {
                         {e.last_http_status ? <code className="rounded bg-red-50 text-red-700 px-1.5 py-0.5 text-xs">{e.last_http_status}</code> : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <button disabled={dlqReplayId === e.id} onClick={() => replayDLQ(e.id)} className={STYLES.buttonPrimary + ' !py-1.5 !text-xs'}>
-                          {dlqReplayId === e.id ? <><Loader2 size={13} className="inline align-text-top animate-spin mr-1" />Replay…</> : '↺ Replay to fanout'}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => setDetailRow(e as unknown as Record<string, unknown>)} className={STYLES.buttonGhost + ' !py-1.5 !text-xs'}>
+                            <Eye size={13} className="inline align-text-top mr-1" />Details
+                          </button>
+                          <button disabled={dlqReplayId === e.id} onClick={() => replayDLQ(e.id)} className={STYLES.buttonPrimary + ' !py-1.5 !text-xs'}>
+                            {dlqReplayId === e.id ? <><Loader2 size={13} className="inline align-text-top animate-spin mr-1" />Replay…</> : '↺ Replay to fanout'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -471,6 +481,12 @@ export default function WebhookEventLogView() {
           </Section>
         )}
       </div>
+
+      <WebhookEventDetailDrawer
+        open={detailRow !== null}
+        row={detailRow}
+        onClose={() => setDetailRow(null)}
+      />
     </div>
   );
 }

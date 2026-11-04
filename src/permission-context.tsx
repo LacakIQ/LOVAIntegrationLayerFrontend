@@ -33,11 +33,14 @@ const PermissionContext = createContext<PermissionContextValue | null>(null);
 export const VIEW_PERMISSIONS: Partial<Record<AppView, string>> = {
   'dashboard': 'dashboard.view',
   'kiriminaja-credentials': 'thirdplil.credentials.view',
+  'kiriminaja-consumer-api-keys': 'thirdplil.credentials.edit',
   'kiriminaja-rate-calculator': 'thirdplil.rates.read',
   'kiriminaja-shipments-dashboard': 'thirdplil.shipments.view',
   'kiriminaja-shipments-create': 'thirdplil.shipments.create',
   'kiriminaja-webhooks-log': 'thirdplil.webhook.view',
   'kiriminaja-cron-monitor': 'thirdplil.webhook.view',
+  'kiriminaja-coverage': 'thirdplil.webhook.view',
+  'kiriminaja-coverage-sync-monitor': 'thirdplil.webhook.view',
   // PGIL
   'pgil-transactions': 'pgil.transactions.view',
   'pgil-credentials': 'pgil.credentials.view',

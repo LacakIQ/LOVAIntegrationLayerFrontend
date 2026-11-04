@@ -19,6 +19,8 @@ import { STYLES, Section, Badge } from '../../components/ui/STYLES.tsx';
 import { getPathForView } from '../../app-routes.ts';
 import { callThirdPLILInternalUI } from '../../utils/thirdplilApi.ts';
 import ShipmentDetailDrawer from '../../components/thirdplil/ShipmentDetailDrawer.tsx';
+import CredentialSelector from '../../components/thirdplil/CredentialSelector.tsx';
+import { DeleteConfirmationModal } from '../../components/shared/DeleteConfirmationModal.tsx';
 import type { BannerMessage, ShipmentHeader, ShipmentStatus } from '../../types/thirdplil.ts';
 
 function toneForStatus(s: ShipmentStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
@@ -79,20 +81,50 @@ const STATUS_ORDER: ShipmentStatus[] = [
   'canceled', 'lost', 'damaged',
 ];
 
+type CreationPathFilter = 'all' | 'path_a' | 'path_b' | 'unknown';
+
+function creationPathKey(shipment: ShipmentHeader): CreationPathFilter {
+  if (shipment.creation_source === 'ui_user') return 'path_a';
+  if (shipment.creation_source === 'consumer_api') return 'path_b';
+  return 'unknown';
+}
+
+function creationPathLabel(shipment: ShipmentHeader): string {
+  switch (creationPathKey(shipment)) {
+    case 'path_a': return 'Dashboard JWT (Path A)';
+    case 'path_b': return 'Consumer API (Path B)';
+    default: return 'Unknown / Legacy';
+  }
+}
+
+function creationPathTone(shipment: ShipmentHeader): 'success' | 'info' | 'warning' {
+  switch (creationPathKey(shipment)) {
+    case 'path_a': return 'info';
+    case 'path_b': return 'success';
+    default: return 'warning';
+  }
+}
+
 export default function ShipmentsDashboardView() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<ShipmentHeader[]>([]);
   const [banner, setBanner] = useState<BannerMessage | null>(null);
   const [q, setQ] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | ShipmentStatus>('all');
+  const [creationPathFilter, setCreationPathFilter] = useState<CreationPathFilter>('all');
+  const [consumerApiKeyFilter, setConsumerApiKeyFilter] = useState<string>('all');
+  const [credentialFilter, setCredentialFilter] = useState<number | null>(null);
   const [drawerShipmentId, setDrawerShipmentId] = useState<number | null>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
   const [downloadingAwbId, setDownloadingAwbId] = useState<number | null>(null);
 
-  const load = async () => {
+  const load = async (credentialId: number | null = credentialFilter) => {
     setLoading(true);
     setBanner(null);
-    const r = await callThirdPLILInternalUI<ShipmentHeader[]>('thirdplil-shipments', { method: 'GET', query: { per_page: 20 } });
+    const query: Record<string, string | number | null | undefined> = { per_page: 20 };
+    if (credentialId != null) query.credential_id = credentialId;
+    const r = await callThirdPLILInternalUI<ShipmentHeader[]>('thirdplil-shipments', { method: 'GET', query });
     setLoading(false);
     if (r.ok) {
       setRows((r.data ?? []) as ShipmentHeader[]);
@@ -103,13 +135,16 @@ export default function ShipmentsDashboardView() {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(credentialFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [credentialFilter]);
 
   const filtered = useMemo(() => {
     const ql = q.toLowerCase().trim();
     return rows.filter((s) => {
       if (filterStatus !== 'all' && s.status !== filterStatus) return false;
+      if (creationPathFilter !== 'all' && creationPathKey(s) !== creationPathFilter) return false;
+      if (consumerApiKeyFilter !== 'all' && String(s.creation_consumer_api_key_id ?? '') !== consumerApiKeyFilter) return false;
       if (!ql) return true;
       return [
           s.awb_no, s.transaction_id, String(s.shipment_id),
@@ -117,9 +152,10 @@ export default function ShipmentsDashboardView() {
           s.sender_name, s.recipient_name,
           s.sender_phone, s.recipient_phone,
         s.courier_service_code, s.courier_service_name,
+        s.creation_source, s.creation_actor,
       ].some((x) => x && String(x).toLowerCase().includes(ql));
     });
-  }, [rows, q, filterStatus]);
+  }, [rows, q, filterStatus, creationPathFilter, consumerApiKeyFilter]);
 
   const cancelShipment = async (id: number) => {
     setCancellingId(id);
@@ -162,6 +198,16 @@ export default function ShipmentsDashboardView() {
     map.set('all', rows.length);
     for (const r of rows) map.set(r.status, (map.get(r.status) ?? 0) + 1);
     return map;
+  }, [rows]);
+
+  const availableConsumerApiKeyIds = useMemo(() => {
+    const ids = Array.from(new Set(
+      rows
+        .map((row) => row.creation_consumer_api_key_id)
+        .filter((id): id is number => id != null)
+    ));
+    ids.sort((a, b) => a - b);
+    return ids;
   }, [rows]);
 
   return (
@@ -226,10 +272,47 @@ export default function ShipmentsDashboardView() {
             <button className={STYLES.buttonSecondary}>
               <FileDown size={14} className="mr-1.5 inline align-text-top" /> Batch Download AWB
             </button>
+              <Link to={getPathForView('kiriminaja-webhooks-log')} className={STYLES.buttonSecondary + ' inline-flex items-center no-underline'}>
+                <Info size={14} className="mr-1.5 inline align-text-top" /> Webhook Logs
+              </Link>
             <Link to={getPathForView('kiriminaja-shipments-create')} className={STYLES.buttonPrimary + ' inline-flex items-center no-underline'}>
               <PlusCircle size={15} className="mr-2 inline align-text-top" />
               Create Shipment
             </Link>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-gray-50/60 p-4">
+          <div className="grid gap-4 xl:grid-cols-3">
+            <CredentialSelector
+              value={credentialFilter}
+              onChange={setCredentialFilter}
+              env="all"
+              label="Filter by Credential (Kosongkan = semua credential)"
+            />
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-gray-700">Creation Path</span>
+              <select className={STYLES.input} value={creationPathFilter} onChange={(e) => setCreationPathFilter(e.target.value as CreationPathFilter)}>
+                <option value="all">All paths</option>
+                <option value="path_a">Dashboard JWT (Path A)</option>
+                <option value="path_b">Consumer API (Path B)</option>
+                <option value="unknown">Unknown / Legacy</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-gray-700">Consumer API Key</span>
+              <select className={STYLES.input} value={consumerApiKeyFilter} onChange={(e) => setConsumerApiKeyFilter(e.target.value)}>
+                <option value="all">All keys / not filtered</option>
+                {availableConsumerApiKeyIds.map((id) => (
+                  <option key={id} value={String(id)}>API Key #{id}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[11px] text-gray-500">
+                Exact API key id only appears on shipments whose creation metadata recorded it. Older rows may stay unknown.
+              </span>
+            </label>
           </div>
         </div>
 
@@ -254,18 +337,18 @@ export default function ShipmentsDashboardView() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Cari AWB / ID / nama / alamat..."
+              placeholder="Cari AWB / ID / nama / alamat / source..."
               className="w-full rounded-xl border border-gray-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
 
-        <Section kicker="ServerDataTable (preview)" title="Shipment List · 9-col grid" subtitle="Full r005 will mount reusable ServerDataTable with pagination 50/per page, column sort, sticky right Actions column. Current r005: real Edge data via callThirdPLILInternalUI.">
+        <Section kicker="ServerDataTable (preview)" title="Shipment List · 11-col grid" subtitle="Full r005 will mount reusable ServerDataTable with pagination 50/per page, column sort, sticky right Actions column. Current r005: real Edge data via callThirdPLILInternalUI.">
           <div className="overflow-x-auto rounded-2xl border border-gray-200">
-            <table className="w-full min-w-[1300px] text-sm">
+            <table className="w-full min-w-[1600px] text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['ID', 'AWB', 'Status', 'Created At', 'Kurir Service', 'Origin → Destination', 'Contact (Pengirim → Penerima)', 'Total (IDR)', 'Actions'].map((h) => (
+                  {['ID', 'AWB', 'Status', 'Created At', 'Creation Path', 'Kurir Service', 'Origin → Destination', 'Contact (Pengirim → Penerima)', 'Total (IDR)', 'Credential', 'Actions'].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -273,16 +356,20 @@ export default function ShipmentsDashboardView() {
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center">
+                    <td colSpan={11} className="px-4 py-10 text-center">
                       <Loader2 size={22} className="mx-auto mb-2 animate-spin text-blue-600" />
                       <p className="text-sm text-gray-500">Loading shipments list...</p>
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-gray-400">
+                    <td colSpan={11} className="px-4 py-10 text-center text-gray-400">
                       <Package size={22} className="mx-auto mb-2 text-gray-300" />
-                      <p>Belum ada shipment{q || filterStatus !== 'all' ? ' yang match filter. Reset filter / search untuk lihat semua.' : ' — buat via Create Shipment button di atas.'}</p>
+                      <p>
+                        Belum ada shipment{q || filterStatus !== 'all' || creationPathFilter !== 'all' || consumerApiKeyFilter !== 'all'
+                          ? ' yang match filter. Reset filter / search untuk lihat semua.'
+                          : ' — buat via Create Shipment button di atas.'}
+                      </p>
                     </td>
                   </tr>
                 ) : (
@@ -294,6 +381,12 @@ export default function ShipmentsDashboardView() {
                         <Badge tone={toneForStatus(s.status)} label={statusLabel(s.status)} />
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">{s.created_at ? new Date(s.created_at).toLocaleString('id-ID') : '—'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Badge tone={creationPathTone(s)} label={creationPathLabel(s)} />
+                        <p className="mt-1 text-[11px] font-mono text-gray-400">
+                          {s.creation_consumer_api_key_id != null ? `API Key #${s.creation_consumer_api_key_id}` : (creationPathKey(s) === 'path_b' ? 'API key not recorded' : (s.creation_actor ?? '—'))}
+                        </p>
+                      </td>
                       <td className="px-4 py-3 text-xs">
                         <p className="font-semibold text-gray-800">{s.courier_service_name ?? '-'}</p>
                         <p className="font-mono text-gray-500">{s.courier_service_code ?? '-'}</p>
@@ -307,6 +400,10 @@ export default function ShipmentsDashboardView() {
                           <p className="font-mono text-gray-400">{s.sender_phone ?? s.sender_contact_phone ?? '-'} → {s.recipient_phone ?? s.recipient_contact_phone ?? '-'}</p>
                         </td>
                         <td className="px-4 py-3 text-right font-semibold text-gray-800 whitespace-nowrap">{idr(s.grand_total_idr ?? s.grand_total_fee_idr ?? null)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <p className="font-mono text-xs text-gray-700">#{s.credential_id ?? s.provider_credential_id ?? '—'}</p>
+                          {s.is_sandbox != null && <Badge tone={s.is_sandbox ? 'warning' : 'neutral'} label={s.is_sandbox ? 'SANDBOX' : 'LIVE'} />}
+                        </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-wrap gap-1 justify-end">
                             <button onClick={() => setDrawerShipmentId(Number(s.shipment_id))} className={STYLES.buttonSecondary + ' !py-1.5 !text-xs'}>
@@ -316,7 +413,7 @@ export default function ShipmentsDashboardView() {
                               {downloadingAwbId === Number(s.shipment_id) ? <Loader2 size={13} className="mr-1 inline align-text-top animate-spin" /> : <Download size={13} className="mr-1 inline align-text-top" />}
                             AWB
                           </button>
-                            <button onClick={() => void cancelShipment(Number(s.shipment_id))} disabled={cancellingId === Number(s.shipment_id)} className="!bg-red-50 hover:!bg-red-100 text-red-700 border border-red-200 rounded-xl px-2 py-1.5 text-xs disabled:opacity-50 transition">
+                            <button onClick={() => setConfirmCancelId(Number(s.shipment_id))} disabled={cancellingId === Number(s.shipment_id)} className="!bg-red-50 hover:!bg-red-100 text-red-700 border border-red-200 rounded-xl px-2 py-1.5 text-xs disabled:opacity-50 transition">
                               {cancellingId === Number(s.shipment_id) ? <Loader2 size={13} className="inline align-text-top animate-spin" /> : 'Cancel'}
                           </button>
                         </div>
@@ -328,12 +425,37 @@ export default function ShipmentsDashboardView() {
             </table>
           </div>
           <div className="mt-3 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
-            <p>Menampilkan {filtered.length} dari {rows.length} shipment · filter = <code className="rounded bg-gray-100 px-1">{filterStatus}</code></p>
+            <p>
+              Menampilkan {filtered.length} dari {rows.length} shipment · status = <code className="rounded bg-gray-100 px-1">{filterStatus}</code> · creation path = <code className="rounded bg-gray-100 px-1">{creationPathFilter}</code> · consumer key = <code className="rounded bg-gray-100 px-1">{consumerApiKeyFilter}</code>
+            </p>
             <p className="italic text-gray-400">Drawer 4 SubTabs: Summary / Packages / Pickup / Timeline — click row mana pun untuk open.</p>
           </div>
         </Section>
 
-        <ShipmentDetailDrawer open={drawerShipmentId !== null} shipmentId={drawerShipmentId} onClose={() => setDrawerShipmentId(null)} />
+        <ShipmentDetailDrawer open={drawerShipmentId !== null} shipmentId={drawerShipmentId} onClose={() => setDrawerShipmentId(null)} onRequestCancel={(id) => setConfirmCancelId(id)} />
+
+        <DeleteConfirmationModal
+          isOpen={confirmCancelId !== null}
+          onClose={() => setConfirmCancelId(null)}
+          onConfirm={async () => {
+            const id = confirmCancelId;
+            if (id == null) return;
+            await cancelShipment(id);
+            setConfirmCancelId(null);
+            setDrawerShipmentId(null);
+          }}
+          title="Cancel Shipment"
+          itemName={confirmCancelId != null ? `shipment #${confirmCancelId}` : 'shipment'}
+          confirmLabel="Ya, Cancel Shipment"
+          zIndexClass="z-[1100]"
+          description={
+            <>
+              Yakin cancel <strong>shipment #{confirmCancelId}</strong>? Status akan menjadi{' '}
+              <code className="rounded bg-gray-100 px-1">canceled</code> dan tidak bisa dikembalikan
+              ke state sebelumnya.
+            </>
+          }
+        />
       </div>
     </div>
   );
