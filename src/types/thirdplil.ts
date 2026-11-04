@@ -438,12 +438,18 @@ export interface ConsumerWebhookRegistration {
   id: number;
   subscriber_id: number;
   description?: string | null;
+  label?: string | null;
   endpoint_url: string;
   hmac_secret_masked?: string | null;
   subscribe_event_names?: ConsumerWebhookEventType[] | null;
+  event_types?: ConsumerWebhookEventType[] | null;
+  events_subscribed?: ConsumerWebhookEventType[] | null;
+  send_for_all_event_types?: boolean | null;
   is_active?: boolean;
   extra_headers_jsonb?: unknown;
   last_delivery_at?: string | null;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
   last_http_status?: number | null;
   total_deliveries?: number | null;
   total_failures?: number | null;

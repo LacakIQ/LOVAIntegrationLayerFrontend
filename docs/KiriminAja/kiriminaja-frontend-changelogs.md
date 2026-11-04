@@ -144,6 +144,38 @@ Shared hook `useShipmentPackageValidator()` — reused by Rate Calculator Packag
 | BUG-KA-FE-28 | MEDIUM | Shipments Dashboard / Detail Drawer | Cancel existed only as a row-level button that fired the `DELETE` immediately with no confirmation, and the shipment detail drawer had no cancel action at all | A single mis-click could cancel a live shipment irreversibly, and an operator reviewing a shipment inside the drawer could not cancel it from there | FIXED in r031 |
 | BUG-KA-FE-29 | MEDIUM | Webhook Event Log `/admin/webhooks` | The log rendered only a fixed subset of columns and offered no way to view the stored payloads, headers, or the consumer's last response — even though `GET /events`/`GET /dlq` already return the full row (`select *`) | Triaging a failed or mis-mapped webhook delivery required querying the database directly instead of reading it from the admin UI | FIXED in r032 |
 | BUG-KA-FE-30 | HIGH | Shipments Dashboard create provenance | The dashboard had no creation-path visibility/filter, and the only visible timeline clue (`source`) was not reliable enough to tell Path A UI vs Path B Consumer API for all rows | Operators could not audit which create path produced a shipment, and could not truthfully filter by source from the dashboard | FIXED in r033 (paired backend r031) |
+| BUG-KA-FE-31 | HIGH | Webhook consumer registration cards | The consumer registration API normalized rows to `label` / `events_subscribed` / `send_for_all_event_types` / `last_success_at`, but the card still rendered the older `description` / `subscribe_event_names` / `last_delivery_at` shape and silently fell back to `(untitled consumer)`, `* (all)`, and `(never)` | `/admin/webhooks` could claim a registration was subscribed to all events and had never delivered even when the DB row was a single-event subscription with successful deliveries, which directly misled webhook triage | FIXED in r034 |
+
+---
+
+### 2026-11-04.r035 — Webhook consumer cards: remove unsupported deliveries-count aggregate
+**Scope**: [src/views/thirdplil/WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx)
+
+#### Changes
+- Removed the **Deliveries count** row from the `/admin/webhooks` consumer registration card. That value is not a trustworthy first-class field in the current admin response shape, so the card now shows only the fields backed by the live payload (`label`, subscribed events / all-events mode, last delivery, secret mask, consecutive failures).
+
+#### Found Bugs
+- (none for this rev)
+
+#### Fixes
+- Simplified the consumer registration card to avoid implying an aggregate that is not actually part of the reliable normalized payload.
+
+---
+
+### 2026-11-04.r034 — Webhook consumer cards now reflect the real registration row shape
+**Backend twin changelog (paired docs)**: [kiriminaja-changelogs.md § 2026-11-04.r032](file:///home/calvin/WebstoreGroup/WebstoreSupabase/supabase/docs/ThirdPLIL/KiriminAja/kiriminaja-changelogs.md#2026-11-04r032--webhook-docs-now-match-the-live-event-catalog-and-all-events-behavior)
+**Scope**: [src/views/thirdplil/WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx#L31-L44), [src/views/thirdplil/WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx#L76-L82), [src/views/thirdplil/WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx#L421-L460), [src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts#L438-L457)
+
+#### Changes
+- **Consumer registration cards now read the live normalized row shape instead of stale aliases.** [WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx#L31-L44) adds small display helpers that prefer `label`, `events_subscribed` / `event_types`, `send_for_all_event_types`, and `last_success_at` / `last_failure_at` when rendering the card. The visible result is that `/admin/webhooks` now shows the actual registration label, the real explicit subscription list or `* (all)` only when the boolean is truly set, and the latest known delivery timestamp rather than a fake `(never)` fallback.
+- **The Add Consumer form copy now matches the live schema contract.** The default subscription input changed from `shipment.*` to `*`, and the helper text now states plainly that wildcard globs like `shipment.*` are not supported by the current schema; use `*` for all events or explicit enum names for partial subscriptions ([WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx#L76-L82), [WebhookEventLogView.tsx](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/views/thirdplil/WebhookEventLogView.tsx#L421-L439)).
+- **`ConsumerWebhookRegistration` typing widened** in [src/types/thirdplil.ts](file:///home/calvin/WebstoreGroup/LOVAIntegrationLayerFrontend/src/types/thirdplil.ts#L438-L457) so the frontend acknowledges both the old UI-friendly aliases and the actual fields coming from `thirdplil-admin-webhooks` (`label`, `event_types`, `events_subscribed`, `send_for_all_event_types`, `last_success_at`, `last_failure_at`).
+
+#### Found Bugs
+- **BUG-KA-FE-31 (HIGH)** — The webhook consumer cards were rendering stale field names and then falling back to misleading defaults, so the UI could say a registration was `* (all)` and `(never)` delivered even when the underlying row was a single-event subscription with a successful last delivery. This directly obscured why an `awb_assigned` inbound event had no matching outbound delivery. Resolved in r034.
+
+#### Fixes
+- Rewired the consumer card to the actual normalized payload fields, corrected the add-form guidance for all-events subscription, and left unknown counts as `—` instead of fabricating zero. `npx tsc --noEmit` clean.
 
 ---
 

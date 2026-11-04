@@ -72,6 +72,14 @@ When completing a feature, bug fix, or refactor:
 
 ### 2026-11-04
 
+#### [ThirdPLIL KiriminAja Frontend (r035 — Webhook consumer cards: remove unsupported deliveries-count aggregate)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r035--webhook-consumer-cards-remove-unsupported-deliveries-count-aggregate)
+- **Changed**: removed the **Deliveries count** row from the `/admin/webhooks` consumer registration card, so the card only shows fields backed by the live normalized registration payload.
+- **Fixed**: (none) — this is a small UI cleanup to avoid showing a weak/unsupported aggregate.
+
+#### [ThirdPLIL KiriminAja Frontend (r034 — Webhook consumer cards now reflect the real registration row shape)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r034--webhook-consumer-cards-now-reflect-the-real-registration-row-shape)
+- **Changed**: `/admin/webhooks` consumer cards now render the actual normalized registration fields (`label`, `events_subscribed` / `event_types`, `send_for_all_event_types`, `last_success_at` / `last_failure_at`) instead of stale aliases that were falling back to `(untitled consumer)`, `* (all)`, and `(never)`. The Add Consumer form now defaults to `*` for all events and explicitly warns that globs like `shipment.*` are not supported by the current schema.
+- **Fixed**: BUG-KA-FE-31 (HIGH — the card could claim a registration was subscribed to all events and had never delivered even when the DB row was a single-event subscription with successful deliveries). `npx tsc --noEmit` clean. Paired backend r032 updates the docs to the same live event model.
+
 #### [ThirdPLIL KiriminAja Frontend (r033 — Consumer API Keys route rename + shipment creation-path filters)](KiriminAja/kiriminaja-frontend-changelogs.md#2026-11-04r033--consumer-api-keys-route-rename--shipment-creation-path-filters)
 - **Changed**: the consumer API keys page moved to **`/consumer/api-keys`** (with a redirect from the old `/settings/kiriminAja/api-keys`) and dropped the `Logistics · KiriminAja` eyebrow, so the route/copy matches the page's provider-neutral purpose. The Shipments Dashboard now consumes derived shipment provenance metadata (`creation_source`, `creation_actor`, `creation_consumer_api_key_id`) and adds a dedicated **Creation Path** filter, a **Consumer API Key** filter, search coverage for source/actor, and a new Creation Path table column.
 - **Fixed**: BUG-KA-FE-30 (HIGH — the dashboard could not truthfully show/filter how a shipment was created, and the visible timeline `source` values were not reliable enough to distinguish Path A vs Path B for all rows). Older rows are intentionally labelled `Unknown / Legacy` instead of guessed. `npx tsc --noEmit` clean. Paired with backend r031.

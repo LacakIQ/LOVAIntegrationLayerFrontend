@@ -28,6 +28,20 @@ function idr(s: string | number | null | undefined) {
   catch { return 'Rp ' + String(n); }
 }
 
+function consumerDisplayLabel(c: ConsumerWebhookRegistration): string {
+  return c.description ?? c.label ?? '(untitled consumer)';
+}
+
+function consumerSubscribedEvents(c: ConsumerWebhookRegistration): string {
+  if (c.send_for_all_event_types === true) return '* (all)';
+  const events = c.subscribe_event_names ?? c.events_subscribed ?? c.event_types ?? [];
+  return events.length ? events.join(', ') : '(none)';
+}
+
+function consumerLastDeliveryAt(c: ConsumerWebhookRegistration): string {
+  return c.last_delivery_at ?? c.last_success_at ?? c.last_failure_at ?? '(never)';
+}
+
 export default function WebhookEventLogView() {
   const [tab, setTab] = useState<TabId>('inbound');
   const [banner, setBanner] = useState<BannerState>(null);
@@ -65,7 +79,7 @@ export default function WebhookEventLogView() {
     subscribe_events: string;
     secret_override: string;
     is_active: boolean;
-  }>({ description: '', endpoint_url: '', subscribe_events: 'shipment.*', secret_override: '', is_active: true });
+  }>({ description: '', endpoint_url: '', subscribe_events: '*', secret_override: '', is_active: true });
   const [newSecretBanner, setNewSecretBanner] = useState<{ secret: string; id: number } | null>(null);
   const [pingLoading, setPingLoading] = useState<number | null>(null);
   const [pingResults, setPingResults] = useState<Record<number, { ok: boolean; http_status?: number | null; snippet?: string; banner?: BannerState }>>({});
@@ -150,7 +164,7 @@ export default function WebhookEventLogView() {
     if (res.ok) {
       const d = res.data as ConsumerWebhookRegistration & { hmac_secret_64_hex_once?: string | null };
       if (d?.hmac_secret_64_hex_once) setNewSecretBanner({ secret: d.hmac_secret_64_hex_once, id: d.id });
-      setNewConsumer({ description: '', endpoint_url: '', subscribe_events: 'shipment.*', secret_override: '', is_active: true });
+      setNewConsumer({ description: '', endpoint_url: '', subscribe_events: '*', secret_override: '', is_active: true });
       setAddOpen(false);
       loadConsumers();
     }
@@ -406,8 +420,8 @@ export default function WebhookEventLogView() {
                   </div>
                   <div>
                     <label className={STYLES.label}>Subscribe events (comma / space-separated)</label>
-                    <input className={STYLES.input + ' font-mono text-xs'} placeholder="shipment.*, pickup.scheduled, delivery.delivered" value={newConsumer.subscribe_events} onChange={(e) => setNewConsumer({ ...newConsumer, subscribe_events: e.target.value })} />
-                    <p className="mt-1 text-[11px] text-gray-500"><code className="rounded bg-gray-100 px-1">shipment.*</code> = all shipment events · <code className="rounded bg-gray-100 px-1">*</code> = absolutely everything.</p>
+                    <input className={STYLES.input + ' font-mono text-xs'} placeholder="*, shipment.created, shipment.awb_assigned" value={newConsumer.subscribe_events} onChange={(e) => setNewConsumer({ ...newConsumer, subscribe_events: e.target.value })} />
+                    <p className="mt-1 text-[11px] text-gray-500"><code className="rounded bg-gray-100 px-1">*</code> = all current event types. Use explicit names for partial subscription; wildcard globs like <code className="rounded bg-gray-100 px-1">shipment.*</code> are not supported by the current schema.</p>
                   </div>
                   <div>
                     <label className={STYLES.label}>Override secret (opsional — 64 hex)</label>
@@ -421,7 +435,7 @@ export default function WebhookEventLogView() {
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <button className={STYLES.buttonGhost} onClick={() => { setAddOpen(false); setNewConsumer({ description: '', endpoint_url: '', subscribe_events: 'shipment.*', secret_override: '', is_active: true }); }}>Cancel</button>
+                  <button className={STYLES.buttonGhost} onClick={() => { setAddOpen(false); setNewConsumer({ description: '', endpoint_url: '', subscribe_events: '*', secret_override: '', is_active: true }); }}>Cancel</button>
                   <button className={STYLES.buttonPrimary} onClick={saveNewConsumer}><Save size={14} className="inline mr-2 align-text-top" />Save & Generate Secret (show once)</button>
                 </div>
               </div>
@@ -438,15 +452,14 @@ export default function WebhookEventLogView() {
                           <Badge tone={c.is_active ? 'success' : 'neutral'} label={c.is_active ? 'ACTIVE' : 'INACTIVE'} />
                           <p className="text-xs font-mono text-gray-500">#{c.id}</p>
                         </div>
-                        <h3 className="mt-2 font-bold text-gray-900 break-words">{c.description || '(untitled consumer)'}</h3>
+                        <h3 className="mt-2 font-bold text-gray-900 break-words">{consumerDisplayLabel(c)}</h3>
                         <a href={c.endpoint_url} target="_blank" rel="noopener noreferrer" className="mt-1 text-xs font-mono text-blue-600 break-all hover:underline block">{c.endpoint_url}</a>
                       </div>
                     </div>
                     <div className="grid gap-2 text-xs text-gray-600">
-                      <div className="flex justify-between gap-2"><span className="text-gray-500">Subscribed events:</span><span className="font-mono max-w-[220px] truncate text-right" title={(c.subscribe_event_names ?? []).join(', ')}>{(c.subscribe_event_names ?? []).length ? c.subscribe_event_names!.join(', ') : '* (all)'}</span></div>
-                      <div className="flex justify-between gap-2"><span className="text-gray-500">Last delivery:</span><span className="font-mono text-right">{c.last_delivery_at ?? '(never)'}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-gray-500">Subscribed events:</span><span className="font-mono max-w-[220px] truncate text-right" title={consumerSubscribedEvents(c)}>{consumerSubscribedEvents(c)}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-gray-500">Last delivery:</span><span className="font-mono text-right">{consumerLastDeliveryAt(c)}</span></div>
                       <div className="flex justify-between gap-2"><span className="text-gray-500">Secret masked:</span><span className="font-mono text-right text-gray-700">{c.hmac_secret_masked ?? '****-????????'}</span></div>
-                      <div className="flex justify-between gap-2"><span className="text-gray-500">Deliveries count:</span><span className="font-mono text-right">{c.total_deliveries ?? 0}</span></div>
                       <div className="flex justify-between gap-2"><span className="text-gray-500">Consecutive failures:</span><span className={'font-mono text-right ' + ((c.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-semibold' : 'text-green-600 font-semibold')}>{c.consecutive_failures ?? 0}</span></div>
                     </div>
                     {pingResults[c.id] && (
