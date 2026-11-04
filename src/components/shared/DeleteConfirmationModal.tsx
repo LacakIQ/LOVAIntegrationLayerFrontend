@@ -1,5 +1,6 @@
 import { Loader2, XCircle } from 'lucide-react'
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 
 const STYLES = {
   buttonDanger:
@@ -16,6 +17,12 @@ type DeleteConfirmationModalProps = {
   onConfirm: () => Promise<void>
   title: string
   itemName: string
+  /** Override the confirm button label (default: "Delete"). */
+  confirmLabel?: string
+  /** Override the body copy (default: the generic delete sentence using `itemName`). */
+  description?: ReactNode
+  /** Override the overlay z-index class (default: "z-50") — raise it to sit above a drawer. */
+  zIndexClass?: string
 }
 
 export function DeleteConfirmationModal({
@@ -24,6 +31,9 @@ export function DeleteConfirmationModal({
   onConfirm,
   title,
   itemName,
+  confirmLabel = 'Delete',
+  description,
+  zIndexClass = 'z-50',
 }: DeleteConfirmationModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -43,7 +53,7 @@ export function DeleteConfirmationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div className={`fixed inset-0 ${zIndexClass} flex items-center justify-center p-4 sm:p-6`}>
       <div
         className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity"
         onClick={onClose}
@@ -71,7 +81,7 @@ export function DeleteConfirmationModal({
                 {deleting ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  'Delete'
+                  confirmLabel
                 )}
               </button>
             </div>
@@ -88,10 +98,12 @@ export function DeleteConfirmationModal({
         </div>
 
         <div className="px-6 py-6">
-          <p className="text-sm text-gray-700">
-            Are you sure you want to delete <strong>{itemName}</strong>? This
-            action cannot be undone.
-          </p>
+          {description ?? (
+            <p className="text-sm text-gray-700">
+              Are you sure you want to delete <strong>{itemName}</strong>? This
+              action cannot be undone.
+            </p>
+          )}
         </div>
       </div>
     </div>

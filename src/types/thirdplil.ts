@@ -98,6 +98,57 @@ export interface ThirdPLILCoverageArea {
   metadata?: Record<string, unknown> | null;
 }
 
+export type CoverageSyncRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type CoverageSyncTriggerSource = 'manual' | 'nightly' | 'api';
+
+export interface CoverageSyncRowCounts {
+  province: number;
+  city: number;
+  district: number;
+  subdistrict: number;
+  courier_services: number;
+}
+
+export interface CoverageSyncRun {
+  run_id: number;
+  subscriber_id: number;
+  provider_id: number;
+  provider_slug: ProviderSlug;
+  env: EnvToggle;
+  trigger_source: CoverageSyncTriggerSource;
+  status: CoverageSyncRunStatus;
+  current_step?: string | null;
+  steps_completed: number;
+  total_steps: number;
+  row_counts: CoverageSyncRowCounts;
+  total_cities?: number | null;
+  processed_cities: number;
+  pending_district_cities?: number | null;
+  sync_complete?: boolean | null;
+  attempt_count: number;
+  last_error?: string | null;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
+  finished_at?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CoverageStats {
+  provider_slug: ProviderSlug;
+  cache_counts: { coverage_areas: number; courier_services: number };
+  credentials_present: { sandbox: boolean; production: boolean };
+  active_run: CoverageSyncRun | null;
+  last_completed_run: CoverageSyncRun | null;
+}
+
+export interface EnqueueCoverageSyncRunResponse {
+  run_id: number;
+  status: CoverageSyncRunStatus;
+  reused: boolean;
+}
+
 export interface CourierServiceCache {
   id?: number;
   provider_id?: number;
@@ -123,7 +174,6 @@ export interface SubscriberCredential {
   provider_id: number;
   provider_slug: ProviderSlug;
   is_sandbox: boolean;
-  is_default: boolean;
   account_label: string;
   /** KA `request_pickup` order_id prefix registered on the KA account (Dashboard > Integrasi). */
   order_id_prefix?: string | null;
@@ -141,6 +191,25 @@ export interface SubscriberCredential {
   webhook_shared_secret_hash?: string | null;
   last_test_conn_at?: string | null;
   last_test_conn_ok?: boolean | null;
+}
+
+export interface ConsumerApiKey {
+  key_id: number;
+  key_prefix: string;
+  label: string;
+  scopes: string[];
+  expires_at?: string | null;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+  created_at: string;
+  provider_id: number;
+  provider_slug?: ProviderSlug | null;
+  provider_display_name?: string | null;
+  /** Route C pin: the exact credential (account + environment) this key resolves to. */
+  credential_id: number;
+  credential_label?: string | null;
+  is_sandbox?: boolean | null;
+  is_active?: boolean;
 }
 
 export interface RateDimension {
@@ -272,6 +341,12 @@ export interface ShipmentHeader {
   pickup_start_time?: string | null;
   pickup_end_time?: string | null;
   pickup_driver_note?: string | null;
+  /** Derived from the earliest shipment history row when available. */
+  creation_source?: string | null;
+  /** Actor from the earliest shipment history row when available. */
+  creation_actor?: string | null;
+  /** Parsed from Path-B creation metadata when the caller API key identity was recorded. */
+  creation_consumer_api_key_id?: number | null;
   provider_data?: unknown;
   created_at?: string | null;
   updated_at?: string | null;

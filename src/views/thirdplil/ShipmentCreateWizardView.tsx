@@ -6,6 +6,7 @@ import { getPathForView } from '../../app-routes.ts';
 import SubTabs from '../../components/SubTabs.tsx';
 import SubdistrictCoverageLookup from '../../components/thirdplil/SubdistrictCoverageLookup.tsx';
 import RateResultsTable from '../../components/thirdplil/RateResultsTable.tsx';
+import CredentialSelector from '../../components/thirdplil/CredentialSelector.tsx';
 import type {
   BannerState,
   CreateShipmentRequest,
@@ -152,7 +153,7 @@ export default function ShipmentCreateWizardView() {
   // Step 5
   const [kaPIN, setKaPIN] = useState<string>('');
   const [kaPINWasUsed, setKaPINWasUsed] = useState<boolean>(false);
-  const [paymentMethod, setPaymentMethod] = useState<'ka_credit' | 'postpaid' | 'cod'>('postpaid');
+  const [paymentMethod, setPaymentMethod] = useState<'ka_credit' | 'postpaid' | 'cod'>('ka_credit');
   const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null);
   const [isSandbox, setIsSandbox] = useState<boolean>(false);
 
@@ -186,7 +187,6 @@ export default function ShipmentCreateWizardView() {
       const cid = parseInt(qp.get('credential_id') || '0', 10);
       if (cid > 0) setSelectedCredentialId(cid);
     }
-    if (qp.get('is_sandbox') === '1' || qp.get('is_sandbox') === 'true') setIsSandbox(true);
     if (qp.get('insurance_enabled') === '1') setInsuranceEnabled(true);
     if (qp.get('cod_amount_idr')) { setCodEnabled(true); setCodAmountIDR(qp.get('cod_amount_idr') as string); }
     if (qp.get('base_fee_idr')) {
@@ -252,18 +252,25 @@ export default function ShipmentCreateWizardView() {
 
   const step5Valid = useMemo(() => {
     if (!step1Valid || !step2Valid || !step3Valid || !step4Valid) return false;
-    if (paymentMethod === 'ka_credit') {
+    if (selectedCredentialId == null) return false;
+    if (paymentMethod === 'ka_credit' && kaPIN.length > 0) {
+      // L1: the PIN is optional — leaving it blank falls back to the credential's stored
+      // (encrypted) KA credit PIN server-side. When typed it must be 4-8 digits.
       if (!/^\d{4,8}$/.test(kaPIN)) return false;
     }
     if (paymentMethod === 'cod') {
       if (!codEnabled || !(Number.parseFloat(codAmountIDR) > 0)) return false;
     }
     return true;
-  }, [step1Valid, step2Valid, step3Valid, step4Valid, paymentMethod, kaPIN, codEnabled, codAmountIDR]);
+  }, [step1Valid, step2Valid, step3Valid, step4Valid, selectedCredentialId, paymentMethod, kaPIN, codEnabled, codAmountIDR]);
 
   // Step 3 side-effect: fetch rates when entering step 3 (and data is ready)
   useEffect(() => {
     if (step !== 3) return;
+    if (selectedCredentialId == null) {
+      setBanner({ tone: 'warning', title: 'Pilih credential dulu', body: 'Rate quotes diambil memakai credential KiriminAja yang dipilih di atas (sandbox/production).' });
+      return;
+    }
     if (!step1Valid || !step2Valid) {
       setBanner({ tone: 'warning', title: 'Lengkapi Step 1 & Step 2 dulu', body: 'Origin/destination minimal level kecamatan, packages minimal 1, weight minimal 10g.' });
       return;
@@ -278,6 +285,7 @@ export default function ShipmentCreateWizardView() {
         method: 'GET',
         isMutation: false,
         timeoutMs: 30000,
+        credentialId: selectedCredentialId,
         query: {
           origin_subdistrict_id: String(originSid),
           destination_subdistrict_id: String(destSid),
@@ -303,11 +311,12 @@ export default function ShipmentCreateWizardView() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, step1Valid, step2Valid]);
+  }, [step, step1Valid, step2Valid, selectedCredentialId]);
 
   // Step 4 fetch pickup windows
   useEffect(() => {
     if (step !== 4) return;
+    if (selectedCredentialId == null) { setBanner({ tone: 'warning', title: 'Pilih credential dulu', body: 'Jadwal pickup diambil memakai credential KiriminAja yang dipilih di atas.' }); return; }
     if (!step1Valid) { setBanner({ tone: 'warning', title: 'Isi Step 1 dulu', body: 'Perlu origin kecamatan untuk cari jadwal pickup.' }); return; }
     (async () => {
       setPickupWindowsLoading(true);
@@ -317,6 +326,7 @@ export default function ShipmentCreateWizardView() {
         method: 'GET',
         isMutation: false,
         timeoutMs: 25000,
+        credentialId: selectedCredentialId,
         query: { origin_subdistrict_id: String(originSid), date_local: pickupDate },
       });
       setPickupWindowsLoading(false);
@@ -327,7 +337,7 @@ export default function ShipmentCreateWizardView() {
       else if (res.banner) setBanner(res.banner);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, pickupDate, step1Valid]);
+  }, [step, pickupDate, step1Valid, selectedCredentialId]);
 
   // Step 2 helpers
   function addPackage() {
@@ -479,6 +489,7 @@ export default function ShipmentCreateWizardView() {
   function next() {
       if (step === 1 && !step1Valid) { setBanner({ tone: 'warning', title: 'Lengkapi Step 1', body: 'Origin & Destination harus punya Subdistrict, Kecamatan Area ID, zipcode, latitude, longitude, nama, telepon, dan alamat.' }); return; }
     if (step === 2 && !step2Valid) { setBanner({ tone: 'warning', title: 'Lengkapi Step 2', body: 'Minimal 1 package (weight >= 10g), 1 item, declared total > 0. Max 20 packages / 50 items.' }); return; }
+    if (step === 2 && selectedCredentialId == null) { setBanner({ tone: 'warning', title: 'Pilih credential KiriminAja', body: 'Rate quotes pada Step 3 butuh credential (sandbox/production). Pilih di panel atas.' }); return; }
     if (step === 3 && !step3Valid) { setBanner({ tone: 'warning', title: 'Pilih 1 rate quote', body: 'Klik "Pilih" di kolom Action salah satu row rate result table.' }); return; }
     if (step === 4 && !step4Valid) { setBanner({ tone: 'warning', title: 'Pilih jadwal pickup', body: 'Pilih salah satu window pickup (tanggal + waktu) yang available.' }); return; }
     setStep((s) => Math.min(5, s + 1) as StepId);
@@ -527,6 +538,17 @@ export default function ShipmentCreateWizardView() {
               Cancel
             </Link>
           </div>
+        </div>
+
+        {/* Path A credential selector — required for all provider calls in this wizard */}
+        <div className="rounded-2xl border border-blue-200 bg-blue-50/40 p-4">
+          <CredentialSelector
+            value={selectedCredentialId}
+            onChange={setSelectedCredentialId}
+            onResolve={(c) => setIsSandbox(!!c?.is_sandbox)}
+            required
+            label="Credential KiriminAja (dipakai untuk rates, pickup & create)"
+          />
         </div>
 
         {/* Stepper */}
@@ -1041,11 +1063,8 @@ export default function ShipmentCreateWizardView() {
               <div className="mb-6 grid gap-4 md:grid-cols-2">
                 <div className={'rounded-2xl border p-5 ' + STYLES.bannerInfo}>
                   <Badge tone={isSandbox ? 'warning' : 'neutral'} label={isSandbox ? 'SANDBOX' : 'PRODUCTION'} />
-                  <p className="mt-2 text-sm text-gray-700">Credential override: <span className="font-mono">{selectedCredentialId ?? '(default by env)'}</span></p>
-                  <label className="mt-3 inline-flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={isSandbox} onChange={(e) => setIsSandbox(e.target.checked)} />
-                    <span className="text-sm text-gray-700">Gunakan credential sandbox</span>
-                  </label>
+                  <p className="mt-2 text-sm text-gray-700">Credential: <span className="font-mono">#{selectedCredentialId ?? '(belum dipilih)'}</span></p>
+                  <p className="mt-1 text-xs text-gray-500">Ganti credential di panel atas wizard bila perlu. Environment otomatis mengikuti credential terpilih.</p>
                 </div>
                 <div className={'rounded-2xl border p-5 ' + STYLES.bannerWarning}>
                   <Badge tone="warning" label="Provider Booking" />
@@ -1072,13 +1091,13 @@ export default function ShipmentCreateWizardView() {
                   <div className="flex items-start gap-3">
                     <Lock size={18} className="mt-0.5 flex-shrink-0 text-purple-600" />
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm text-purple-900">Masukkan KA Credit PIN (6 digit, EPHEMERAL)</p>
-                      <p className="mt-1 text-xs text-purple-800 opacity-90">PIN TIDAK PERNAH disimpan di database / tidak pernah di-log. Dihapus dari React state di finally block setelah API call return (success/failure), dan dihapus ketika user menutup tab window.</p>
+                      <p className="font-semibold text-sm text-purple-900">KA Credit PIN (opsional)</p>
+                      <p className="mt-1 text-xs text-purple-800 opacity-90">Kosongkan untuk memakai PIN tersimpan (terenkripsi) milik credential ini. PIN yang diisi bersifat EPHEMERAL: TIDAK PERNAH disimpan di database / di-log, dihapus dari React state di finally block setelah API call, dan dihapus saat user menutup tab window.</p>
                     </div>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                     <div>
-                      <label className={STYLES.label}>PIN (4-8 digit) <span className="text-red-500">*</span></label>
+                      <label className={STYLES.label}>PIN (4-8 digit, opsional)</label>
                       <input type="password" maxLength={8} pattern="[0-9]*" inputMode="numeric" className={STYLES.input} placeholder="••••••" value={kaPIN} onChange={(e) => setKaPIN(e.target.value.replace(/\D/g, '').slice(0, 8))} />
                     </div>
                     <div className="flex items-end">

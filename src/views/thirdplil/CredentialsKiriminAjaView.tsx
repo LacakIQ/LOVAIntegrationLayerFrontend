@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Copy, Delete, Info, KeyRound, Loader2, Pencil, PlusCircle, RefreshCw, Save, ShieldCheck, Star, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Copy, Delete, Info, KeyRound, Loader2, Pencil, PlusCircle, RefreshCw, Save, ShieldCheck, Trash2, X } from 'lucide-react';
 import { STYLES, Section, Badge } from '../../components/ui/STYLES.tsx';
 import { getPathForView } from '../../app-routes.ts';
 import { callThirdPLILInternalUI } from '../../utils/thirdplilApi.ts';
@@ -67,15 +67,6 @@ export default function CredentialsKiriminAjaView() {
       if (hrs < 24) return `${hrs}h lalu`;
       return `${Math.round(hrs / 24)}d lalu`;
     } catch { return iso.slice(0, 10); }
-  };
-
-  const setDefault = async (id: number) => {
-    setActionLoading((p) => ({ ...p, [`default_${id}`]: true }));
-    const r = await callThirdPLILInternalUI<{ ok: boolean; previous_default_id: number | null; new_default_id: number | null }>(`thirdplil-admin-credentials/credentials/${id}/set-default`, { method: 'POST', isMutation: true });
-    setActionLoading((p) => ({ ...p, [`default_${id}`]: false }));
-    if (!r.ok) { setBanner(r.banner); return; }
-    setBanner({ tone: 'success', title: 'Credential di-set sebagai Default.', body: r.warnings ? r.warnings.join('; ') : 'Semua pemanggilan Edge untuk grup yang sama tanpa override X-ThirdPLIL-Credential-Id akan menggunakan credential ini.' });
-    await loadData(envFilter);
   };
 
   const testConnection = async (id: number) => {
@@ -146,12 +137,7 @@ export default function CredentialsKiriminAjaView() {
     await loadData(envFilter);
   };
 
-  const deleteCred = async (id: number, isDefault: boolean, nInEnv: number) => {
-    if (isDefault && nInEnv > 1) {
-      setBanner({ tone: 'danger', title: 'Tidak bisa menghapus credential default.', body: `Pilih credential lain sebagai DEFAULT terlebih dahulu (ada ${nInEnv} credential aktif dalam grup ENV yang sama). Hapus dibatalkan.` });
-      setDeleteConfirmId(null);
-      return;
-    }
+  const deleteCred = async (id: number) => {
     setActionLoading((p) => ({ ...p, [`del_${id}`]: true }));
     const r = await callThirdPLILInternalUI<{ ok: boolean; removed_rows: number }>(`thirdplil-admin-credentials/credentials/${id}`, { method: 'DELETE', isMutation: true });
     setActionLoading((p) => ({ ...p, [`del_${id}`]: false }));
@@ -229,7 +215,7 @@ export default function CredentialsKiriminAjaView() {
             <div className="min-w-0 flex-1">
               <p className="font-semibold">View LIVE · ThirdPLIL Credentials Admin (Path A JWT)</p>
               <p className="mt-1 text-sm opacity-90">
-                Full implementation — List / Add / Set Default / Test Connection / Delete dengan real call ke <code className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-900 text-xs">callThirdPLILInternalUI</code>. See full wiring: <code className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-900 text-xs">thirdplil-admin-credentials</code> Edge Function.
+                Full implementation — List / Add / Test Connection / Delete dengan real call ke <code className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-900 text-xs">callThirdPLILInternalUI</code>. See full wiring: <code className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-900 text-xs">thirdplil-admin-credentials</code> Edge Function. Akun dipilih per-request lewat Credential Selector (tanpa konsep default).
               </p>
             </div>
           </div>
@@ -332,17 +318,15 @@ export default function CredentialsKiriminAjaView() {
             <p className="text-sm text-gray-500">Loading credentials...</p>
           </div>
         ) : (
-          <Section kicker="Credential Grid" title="Account Cards (2/3/4-col responsive)" subtitle="Hover card → menampilkan 3 action: Set Default, Test Connection, Delete. ⭐ = default grup.">
+          <Section kicker="Credential Grid" title="Account Cards (2/3/4-col responsive)" subtitle="Hover card → menampilkan action: Test Connection, Register Callback, KA PIN, Edit, Delete.">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filtered.map((c) => {
-                const nInSameEnv = data.filter((x) => x.provider_slug === c.provider_slug && x.is_sandbox === c.is_sandbox).length;
                 return (
                   <div key={c.id} className="group relative rounded-2xl border border-gray-200 p-5 bg-white hover:bg-gray-50 transition shadow-sm hover:shadow-md">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-bold text-gray-900">{c.account_label}</p>
-                          {c.is_default && <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-bold text-yellow-800 inline-flex items-center gap-1"><Star size={10} fill="currentColor" /> DEFAULT</span>}
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
                           <Badge tone={c.is_sandbox ? 'warning' : 'success'} label={c.is_sandbox ? 'SANDBOX' : 'PRODUCTION'} />
@@ -417,14 +401,6 @@ export default function CredentialsKiriminAjaView() {
                       </div>
                     </div>
                     <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-1.5 opacity-0 group-hover:opacity-100 transition">
-                      <button
-                        onClick={() => void setDefault(c.id)}
-                        disabled={c.is_default || !!actionLoading[`default_${c.id}`]}
-                        className={STYLES.buttonSecondary + ' !py-1.5 !text-xs flex-1'}
-                      >
-                        {actionLoading[`default_${c.id}`] ? <Loader2 size={14} className="mr-1.5 inline align-text-top animate-spin" /> : <Star size={14} className="mr-1.5 inline align-text-top" />}
-                        {c.is_default ? 'Sudah Default' : 'Set Default'}
-                      </button>
                       <button
                         onClick={() => void testConnection(c.id)}
                         disabled={!!actionLoading[`test_${c.id}`]}
@@ -509,9 +485,9 @@ export default function CredentialsKiriminAjaView() {
                     {deleteConfirmId === c.id && (
                       <div className="absolute inset-0 z-10 bg-white/95 rounded-2xl border-2 border-red-200 p-4 flex flex-col justify-center">
                         <p className="font-bold text-red-700 text-sm">Confirm Hapus Credential?</p>
-                        <p className="mt-1 text-xs text-gray-600">Action ini akan menghapus row credential #{c.id}. {c.is_default && <span className="text-red-600 font-semibold">INI ADALAH DEFAULT dalam grup {nInSameEnv} row ENV yang sama — hanya bisa dihapus jika jumlah credential = 1.</span>}</p>
+                        <p className="mt-1 text-xs text-gray-600">Action ini akan menghapus row credential #{c.id}. <span className="font-semibold">Ditolak bila masih dipakai oleh shipment atau consumer API key.</span></p>
                         <div className="mt-3 flex gap-2">
-                          <button onClick={() => void deleteCred(c.id, c.is_default, nInSameEnv)} className="!bg-red-600 hover:!bg-red-700 text-white rounded-xl px-3 py-1.5 text-xs flex-1 font-semibold disabled:opacity-50" disabled={!!actionLoading[`del_${c.id}`]}>
+                          <button onClick={() => void deleteCred(c.id)} className="!bg-red-600 hover:!bg-red-700 text-white rounded-xl px-3 py-1.5 text-xs flex-1 font-semibold disabled:opacity-50" disabled={!!actionLoading[`del_${c.id}`]}>
                             {actionLoading[`del_${c.id}`] ? <Loader2 size={13} className="mr-1 inline align-text-top animate-spin" /> : <Delete size={13} className="mr-1 inline align-text-top" />} Ya, Hapus Permanen
                           </button>
                           <button onClick={() => setDeleteConfirmId(null)} className={STYLES.buttonGhost + ' !py-1.5 !text-xs flex-1'}>

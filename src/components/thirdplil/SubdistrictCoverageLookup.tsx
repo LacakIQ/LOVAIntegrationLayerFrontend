@@ -18,7 +18,7 @@ export default function SubdistrictCoverageLookup({
   parentId,
   env = 'production',
   showSearchBar = true,
-  selectedIds = { province: null, city: null, district: null, subdistrict: null },
+  selectedIds,
   onSelect,
 }: SubdistrictCoverageLookupProps) {
   const [tab, setTab] = useState<'province' | 'city' | 'district' | 'subdistrict'>('province');
@@ -26,7 +26,9 @@ export default function SubdistrictCoverageLookup({
   const [rows, setRows] = useState<ThirdPLILCoverageArea[]>([]);
   const [loading, setLoading] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
-  const [pathIds, setPathIds] = useState<{ province?: number | null; city?: number | null; district?: number | null; subdistrict?: number | null }>(selectedIds);
+  const [pathIds, setPathIds] = useState<{ province?: number | null; city?: number | null; district?: number | null; subdistrict?: number | null }>(
+    () => selectedIds ?? {}
+  );
 
   const levels: Array<{ id: 'province' | 'city' | 'district' | 'subdistrict'; label: string }> = [
     { id: 'province', label: '① Provinsi' },
@@ -36,8 +38,9 @@ export default function SubdistrictCoverageLookup({
   ];
 
   useEffect(() => {
-    setPathIds((prev) => ({ ...prev, ...selectedIds }));
-  }, [selectedIds]);
+    if (!selectedIds) return;
+    setPathIds(selectedIds);
+  }, [selectedIds?.province, selectedIds?.city, selectedIds?.district, selectedIds?.subdistrict]);
 
   const parentIdForTab = useMemo(() => {
     if (tab === 'city') return pathIds.province ?? parentId ?? null;
@@ -184,6 +187,7 @@ export default function SubdistrictCoverageLookup({
                       <div className="flex flex-wrap items-center gap-2">
                         {tab === 'subdistrict' && (
                           <button
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); selectArea(area); }}
                             className={STYLES.buttonPrimary + ' !py-1.5 !text-xs'}
                           >
@@ -193,6 +197,7 @@ export default function SubdistrictCoverageLookup({
                         )}
                         {tab === 'district' && (
                           <button
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); selectArea(area); }}
                             className={STYLES.buttonPrimary + ' !py-1.5 !text-xs'}
                           >
@@ -202,6 +207,7 @@ export default function SubdistrictCoverageLookup({
                         )}
                         {tab !== 'subdistrict' && (
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setPathIds((prev) => {

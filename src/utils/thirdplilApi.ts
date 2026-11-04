@@ -21,6 +21,12 @@ export interface CallThirdPLILInternalUIOptions {
   timeoutMs?: number;
 }
 
+export interface EnvelopeMeta {
+  page?: number;
+  per_page?: number;
+  total?: number;
+}
+
 export type CallResult<T> =
   | {
       ok: true;
@@ -29,6 +35,7 @@ export type CallResult<T> =
       duplicateOfId?: never;
       warnings?: string[];
       banner?: BannerMessage | null;
+        meta?: EnvelopeMeta | null;
       httpStatus: number;
     }
   | {
@@ -38,6 +45,7 @@ export type CallResult<T> =
       duplicateOfId?: number | string | null;
       warnings?: string[];
       banner?: BannerMessage | null;
+        meta?: EnvelopeMeta | null;
       httpStatus: number;
     }
   | {
@@ -194,11 +202,17 @@ export async function callThirdPLILInternalUI<T>(
 
   const httpStatus = resp.status;
   let envelope: StandardEnvelope<T> | null = null;
+  let envelopeMeta: EnvelopeMeta | null = null;
   const rawText = await resp.text().catch(() => '');
   try {
-    if (rawText.length > 0) envelope = JSON.parse(rawText) as StandardEnvelope<T>;
+      if (rawText.length > 0) {
+        const parsed = JSON.parse(rawText) as StandardEnvelope<T> & { meta?: EnvelopeMeta | null };
+        envelope = parsed;
+        envelopeMeta = parsed.meta ?? null;
+      }
   } catch {
     envelope = null;
+      envelopeMeta = null;
   }
 
   if (httpStatus === 409 || (envelope && envelope.is_duplicate === true)) {
@@ -208,6 +222,7 @@ export async function callThirdPLILInternalUI<T>(
       data: (envelope?.data ?? null) as T | null,
       duplicateOfId: envelope?.duplicate_of_id ?? null,
       warnings: envelope?.warnings ?? undefined,
+        meta: envelopeMeta,
       httpStatus,
       banner: {
         tone: 'info',
@@ -225,6 +240,7 @@ export async function callThirdPLILInternalUI<T>(
       isDuplicate: false,
       data: (envelope?.data ?? null) as T,
       warnings: envelope?.warnings ?? undefined,
+        meta: envelopeMeta,
       httpStatus,
     };
   }

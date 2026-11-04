@@ -12,6 +12,7 @@ export default function SubTabs({ tabs, active, setActive }: SubTabsProps) {
       {tabs.map((tab) => (
         <button
           key={tab.id}
+            type="button"
           onClick={() => setActive(tab.id)}
           className={
             'py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ' +

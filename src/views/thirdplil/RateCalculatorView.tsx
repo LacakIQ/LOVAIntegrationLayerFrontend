@@ -6,6 +6,7 @@ import { getPathForView } from '../../app-routes.ts';
 import { callThirdPLILInternalUI } from '../../utils/thirdplilApi.ts';
 import SubdistrictCoverageLookup from '../../components/thirdplil/SubdistrictCoverageLookup.tsx';
 import RateResultsTable from '../../components/thirdplil/RateResultsTable.tsx';
+import CredentialSelector from '../../components/thirdplil/CredentialSelector.tsx';
 import type { BannerMessage, RateQuote, ThirdPLILCoverageArea } from '../../types/thirdplil.ts';
 
 export default function RateCalculatorView() {
@@ -23,13 +24,14 @@ export default function RateCalculatorView() {
   const [useCod, setUseCod] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [quotes, setQuotes] = useState<RateQuote[]>([]);
+  const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null);
 
   // Kecamatan (district) is a valid final level — kelurahan is optional. The backend
   // resolves either level to the provider kecamatan id, so both are accepted here.
   const isFinalLevel = (a: ThirdPLILCoverageArea | null) => a?.level === 'district' || a?.level === 'subdistrict';
   const canFetch = useMemo(
-    () => !!origin && !!destination && isFinalLevel(origin) && isFinalLevel(destination) && weightKg >= 0.01,
-    [origin, destination, weightKg]
+    () => !!origin && !!destination && isFinalLevel(origin) && isFinalLevel(destination) && weightKg >= 0.01 && selectedCredentialId != null,
+    [origin, destination, weightKg, selectedCredentialId]
   );
 
   useEffect(() => {
@@ -41,6 +43,8 @@ export default function RateCalculatorView() {
       if (!Number.isNaN(d)) setDestination({ id: d, level: 'subdistrict', parent_id: null, code: 'DES', name: params.get('destination_name') ?? `Destination #${d}`, full_path: null });
       const wt = parseFloat(params.get('weight_kg') ?? '');
       if (!Number.isNaN(wt)) setWeightKg(wt);
+      const cred = parseInt(params.get('credential_id') ?? '', 10);
+      if (!Number.isNaN(cred)) setSelectedCredentialId(cred);
     }
   }, []);
 
@@ -50,6 +54,7 @@ export default function RateCalculatorView() {
     setBanner(null);
     const r = await callThirdPLILInternalUI<RateQuote[]>('thirdplil-rates', {
       method: 'GET',
+      credentialId: selectedCredentialId,
       query: {
         origin_subdistrict_id: origin.id,
         destination_subdistrict_id: destination.id,
@@ -98,7 +103,7 @@ export default function RateCalculatorView() {
       courier_service_name: q.courier_service_name,
       base_fee_idr: q.base_fee_idr,
       grand_total_idr: q.grand_total_idr,
-      credential_id: String(q.provider_credential_id ?? q.credential_id ?? ''),
+      credential_id: String(selectedCredentialId ?? ''),
       is_sandbox: q.is_sandbox ? '1' : '0',
     });
     navigate(`${getPathForView('kiriminaja-shipments-create')}?${params.toString()}`);
@@ -165,6 +170,14 @@ export default function RateCalculatorView() {
         <Section kicker="2-Column Layout" title="2/5 = Form Inputs · 3/5 = RateResultsTable" subtitle="Kedua column dapat scroll independen. Select quote lanjut ke Wizard ShipmentCreate.">
           <div className="grid gap-6 lg:grid-cols-5">
             <div className="lg:col-span-2 space-y-4">
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <CredentialSelector
+                  value={selectedCredentialId}
+                  onChange={setSelectedCredentialId}
+                  required
+                  label="Credential KiriminAja (wajib)"
+                />
+              </div>
               <div className="rounded-2xl border border-gray-200 p-4 space-y-5">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold flex items-center gap-2 text-xs uppercase tracking-wider text-blue-700">📍 Origin (Pengirim) — Kecamatan/Kelurahan</p>
